@@ -793,11 +793,12 @@ class ManagerDashboardController extends Controller
                 'data'    => $result,
             ], 200);
         } catch (\Exception $e) {
+            $status = ($e->getCode() >= 400 && $e->getCode() < 600) ? $e->getCode() : 400;
             return response()->json([
                 'success' => false,
                 'status'  => 'error',
                 'message' => 'Gagal menjalankan pembagian bunga: ' . $e->getMessage()
-            ], 400);
+            ], $status);
         }
     }
 
@@ -1306,6 +1307,8 @@ class ManagerDashboardController extends Controller
                     'no_buku_putih'             => $member->buku_putih_no,
                     'has_buku_biru'             => (bool) $member->has_buku_biru,
                     'has_buku_putih'            => (bool) $member->has_buku_putih,
+                    'is_white_book_active'      => (bool) ($member->is_white_book_active ?? true),
+                    'white_book_active'         => (bool) ($member->is_white_book_active ?? true),
                     'full_name'                 => $member->name,
                     'name'                      => $member->name,
                     'nama'                      => $member->name,
@@ -1399,6 +1402,8 @@ class ManagerDashboardController extends Controller
                 'no_buku_putih'       => $member->buku_putih_no,
                 'has_buku_biru'       => (bool) $member->has_buku_biru,
                 'has_buku_putih'      => (bool) $member->has_buku_putih,
+                'is_white_book_active'=> (bool) ($member->is_white_book_active ?? true),
+                'white_book_active'   => (bool) ($member->is_white_book_active ?? true),
                 'phone'               => $member->phone,
                 'no_wa'               => $member->phone,
                 'email'               => $member->email,

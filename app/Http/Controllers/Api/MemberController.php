@@ -124,22 +124,24 @@ class MemberController extends Controller
             })
             ->orderBy('name', 'asc');
 
-        $members = $query->get(['id', 'name', 'member_number', 'nik', 'phone', 'status', 'has_buku_biru', 'has_buku_putih']);
+        $members = $query->get(['id', 'name', 'member_number', 'nik', 'phone', 'status', 'has_buku_biru', 'has_buku_putih', 'is_white_book_active']);
 
         $data = $members->map(function ($m) {
             return [
-                'id'            => $m->id,
-                'name'          => $m->name,
-                'nama'          => $m->name,
-                'member_no'     => $m->member_number,
-                'member_number' => $m->member_number,
-                'no_anggota'    => $m->member_number,
-                'nik'           => $m->nik,
-                'phone'         => $m->phone,
-                'no_hp'         => $m->phone,
-                'status'        => $m->status,
-                'has_buku_biru' => (bool) $m->has_buku_biru,
-                'has_buku_putih'=> (bool) $m->has_buku_putih,
+                'id'                   => $m->id,
+                'name'                 => $m->name,
+                'nama'                 => $m->name,
+                'member_no'            => $m->member_number,
+                'member_number'        => $m->member_number,
+                'no_anggota'           => $m->member_number,
+                'nik'                  => $m->nik,
+                'phone'                => $m->phone,
+                'no_hp'                => $m->phone,
+                'status'               => $m->status,
+                'has_buku_biru'        => (bool) $m->has_buku_biru,
+                'has_buku_putih'       => (bool) $m->has_buku_putih,
+                'is_white_book_active' => (bool) ($m->is_white_book_active ?? true),
+                'white_book_active'    => (bool) ($m->is_white_book_active ?? true),
             ];
         });
 
@@ -539,10 +541,12 @@ class MemberController extends Controller
                 'sektor_gereja'  => $member->church_sector,
                 'address'        => $member->address,
                 'alamat'         => $member->address,
-                'status'         => $member->status,
-                'has_buku_biru'  => (bool) $member->has_buku_biru,
-                'has_buku_putih' => (bool) $member->has_buku_putih,
-                'buku_putih_no'  => $member->buku_putih_no,
+                'status'               => $member->status,
+                'has_buku_biru'        => (bool) $member->has_buku_biru,
+                'has_buku_putih'       => (bool) $member->has_buku_putih,
+                'is_white_book_active' => (bool) ($member->is_white_book_active ?? true),
+                'white_book_active'    => (bool) ($member->is_white_book_active ?? true),
+                'buku_putih_no'        => $member->buku_putih_no,
                 'no_buku_putih'  => $member->buku_putih_no,
                 'daily_savings'  => $dailySavings,
                 'simpanan'       => [
@@ -867,9 +871,11 @@ class MemberController extends Controller
             'no_buku_putih'       => 'nullable|string|max:50',
             'rekening_buku_putih' => 'nullable|string|max:50',
             'nomor_buku_putih'    => 'nullable|string|max:50',
-            'has_buku_biru'       => 'nullable|boolean',
-            'has_buku_putih'      => 'nullable|boolean',
-            'nik'                 => [
+            'has_buku_biru'        => 'nullable|boolean',
+            'has_buku_putih'       => 'nullable|boolean',
+            'is_white_book_active' => 'nullable|boolean',
+            'white_book_active'    => 'nullable|boolean',
+            'nik'                  => [
                 'nullable',
                 'string',
                 'max:20',
@@ -968,6 +974,9 @@ class MemberController extends Controller
 
         if ($request->has('has_buku_biru')) $validatedData['has_buku_biru'] = filter_var($request->has_buku_biru, FILTER_VALIDATE_BOOLEAN);
         if ($request->has('has_buku_putih')) $validatedData['has_buku_putih'] = filter_var($request->has_buku_putih, FILTER_VALIDATE_BOOLEAN);
+        if ($request->has('is_white_book_active')) $validatedData['is_white_book_active'] = filter_var($request->is_white_book_active, FILTER_VALIDATE_BOOLEAN);
+        if ($request->has('white_book_active')) $validatedData['is_white_book_active'] = filter_var($request->white_book_active, FILTER_VALIDATE_BOOLEAN);
+        unset($validatedData['white_book_active']);
 
         if ($request->has('tempat_lahir')) $validatedData['place_of_birth'] = $request->tempat_lahir;
         if ($request->has('birth_place')) $validatedData['place_of_birth'] = $request->birth_place;

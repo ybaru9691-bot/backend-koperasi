@@ -42,31 +42,35 @@ class BukuPutihMemberStatusToggleTest extends TestCase
         Sanctum::actingAs($this->adminUser);
 
         $member = Member::create([
-            'name'          => 'Test Anggota Aktif',
-            'member_number' => 101,
-            'nik'           => '1234567890101',
-            'status'        => 'active',
-            'daily_savings' => 1000000,
+            'name'                 => 'Test Anggota Aktif',
+            'member_number'        => 101,
+            'nik'                  => '1234567890101',
+            'status'               => 'active',
+            'is_white_book_active' => true,
+            'daily_savings'        => 1000000,
         ]);
 
         // 1. Toggle via PATCH /api/buku-putih/members/{id}/toggle-status to inactive
         $response = $this->patchJson("/api/buku-putih/members/{$member->id}/toggle-status", [
-            'status' => 'inactive',
+            'status' => 'tidak_aktif',
         ]);
 
         $response->assertStatus(200)
             ->assertJson([
                 'success' => true,
                 'data'    => [
-                    'id'        => $member->id,
-                    'status'    => 'inactive',
-                    'is_active' => false,
+                    'id'                   => $member->id,
+                    'status'               => 'active',
+                    'is_white_book_active' => false,
+                    'is_active'            => false,
+                    'status_label'         => 'TIDAK AKTIF',
                 ],
             ]);
 
         $this->assertDatabaseHas('members', [
-            'id'     => $member->id,
-            'status' => 'inactive',
+            'id'                   => $member->id,
+            'status'               => 'active',
+            'is_white_book_active' => false,
         ]);
 
         // 2. Toggle via POST /api/members/{id}/toggle-status (auto toggle back to active)
@@ -75,18 +79,21 @@ class BukuPutihMemberStatusToggleTest extends TestCase
             ->assertJson([
                 'success' => true,
                 'data'    => [
-                    'id'        => $member->id,
-                    'status'    => 'active',
-                    'is_active' => true,
+                    'id'                   => $member->id,
+                    'status'               => 'active',
+                    'is_white_book_active' => true,
+                    'is_active'            => true,
+                    'status_label'         => 'AKTIF',
                 ],
             ]);
 
         $this->assertDatabaseHas('members', [
-            'id'     => $member->id,
-            'status' => 'active',
+            'id'                   => $member->id,
+            'status'               => 'active',
+            'is_white_book_active' => true,
         ]);
 
-        // 3. Toggle via PATCH /api/members/{id}/status with 'pasif' -> normalized to 'inactive'
+        // 3. Toggle via PATCH /api/members/{id}/status with 'pasif' -> sets is_white_book_active to false
         $response3 = $this->patchJson("/api/members/{$member->id}/status", [
             'status' => 'pasif',
         ]);
@@ -95,11 +102,19 @@ class BukuPutihMemberStatusToggleTest extends TestCase
             ->assertJson([
                 'success' => true,
                 'data'    => [
-                    'id'        => $member->id,
-                    'status'    => 'inactive',
-                    'is_active' => false,
+                    'id'                   => $member->id,
+                    'status'               => 'active',
+                    'is_white_book_active' => false,
+                    'is_active'            => false,
+                    'status_label'         => 'TIDAK AKTIF',
                 ],
             ]);
+
+        $this->assertDatabaseHas('members', [
+            'id'                   => $member->id,
+            'status'               => 'active',
+            'is_white_book_active' => false,
+        ]);
     }
 
     public function test_inactive_member_gets_zero_interest_in_preview_and_distribution()

@@ -89,11 +89,12 @@ class InterestController extends Controller
                 'data'    => $result,
             ], 200);
         } catch (\Exception $e) {
+            $status = ($e->getCode() >= 400 && $e->getCode() < 600) ? $e->getCode() : 400;
             return response()->json([
                 'success' => false,
                 'status'  => 'error',
-                'message' => 'Gagal mendistribusikan bunga: ' . $e->getMessage(),
-            ], 400);
+                'message' => $e->getMessage(),
+            ], $status);
         }
     }
 

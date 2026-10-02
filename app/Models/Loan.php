@@ -182,4 +182,107 @@ class Loan extends Model
 
         return $schedule;
     }
+
+    /**
+     * Rekalkulasi saldo berjalan (running balance) dan jadwal bunga menurun
+     * secara berurutan berdasarkan PEMBAYARAN POKOK AKTUAL.
+     *
+     * Aturan Finansial:
+     * 1. Bunga/jasa periode berjalan dihitung dari sisa pokok sebelum pembayaran.
+     * 2. Pengurangan sisa saldo pokok menggunakan POKOK AKTUAL yang dibayar anggota (bukan pokok jadwal).
+     * 3. Sisa saldo pokok baru menjadi saldo awal (beginning_balance) untuk periode berikutnya.
+     * 4. Bunga periode berikutnya otomatis menurun mengikuti saldo pokok baru (saldo menurun 2,5%).
+     *
+     * @return array
+     */
+    public function recalculateSchedule(): array
+    {
+        $installments = $this->installments()->orderBy('installment_number', 'asc')->get();
+        if ($installments->isEmpty()) {
+            return [];
+        }
+
+        $tenor       = $this->tenor;
+        $method      = $this->attributes['interest_method'] ?? 'declining_balance';
+        $defaultRate = ($method === 'flat') ? 1.00 : 2.50;
+        $rate        = (float) ($this->attributes['interest_rate'] ?? $defaultRate);
+        $plafon      = (float) $this->attributes['amount'];
+
+        // Tentukan saldo awal pinjaman sebelum angsuran ke-1
+        $firstInst = $installments->first();
+        $initialBalance = ((float) ($firstInst->beginning_balance ?? 0) > 0)
+            ? (float) $firstInst->beginning_balance
+            : $plafon;
+
+        $runningBalance = $initialBalance;
+        $principalChunk = (float) ceil($initialBalance / max(1, $tenor));
+        $lastPaidEndingBalance = null;
+
+        $unpaidInstallments = $installments->where('status', '!=', 'paid')->values();
+        $unpaidCount = $unpaidInstallments->count();
+        $processedUnpaid = 0;
+
+        foreach ($installments as $inst) {
+            $isPaid = $inst->status === 'paid';
+
+            if ($isPaid) {
+                $beginBal = $runningBalance;
+                $actualPrincipal = (float) $inst->principal_amount;
+                $endBal = max(0.0, round($beginBal - $actualPrincipal, 2));
+
+                $inst->beginning_balance = $beginBal;
+                $inst->ending_balance    = $endBal;
+                $inst->save();
+
+                $runningBalance = $endBal;
+                $lastPaidEndingBalance = $endBal;
+            } else {
+                $processedUnpaid++;
+                $beginBal = $runningBalance;
+
+                if ($beginBal <= 0) {
+                    $inst->beginning_balance = 0.0;
+                    $inst->principal_amount  = 0.0;
+                    $inst->interest_amount   = 0.0;
+                    $inst->ending_balance    = 0.0;
+                    $inst->total_amount      = 0.0;
+                    $inst->save();
+                    $runningBalance = 0.0;
+                } else {
+                    $jasa = ($method === 'flat')
+                        ? (float) round($plafon * ($rate / 100), 0)
+                        : (float) round($beginBal * ($rate / 100), 0);
+
+                    $isLastUnpaid = ($processedUnpaid === $unpaidCount);
+                    $chunk = ($isLastUnpaid || $beginBal < $principalChunk) ? $beginBal : $principalChunk;
+                    $endBal = max(0.0, round($beginBal - $chunk, 2));
+                    $actualPrincipal = round($beginBal - $endBal, 2);
+
+                    $penaltyFee = (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0);
+
+                    $inst->beginning_balance = $beginBal;
+                    $inst->principal_amount  = $actualPrincipal;
+                    $inst->interest_amount   = $jasa;
+                    $inst->ending_balance    = $endBal;
+                    $inst->total_amount      = $actualPrincipal + $jasa + $penaltyFee;
+                    $inst->save();
+
+                    $runningBalance = $endBal;
+                }
+            }
+        }
+
+        // Update sisa pokok di model Loan
+        $currentRemaining = $lastPaidEndingBalance !== null ? $lastPaidEndingBalance : $initialBalance;
+        $this->remaining_principal = $currentRemaining;
+        if (\Illuminate\Support\Facades\Schema::hasColumn('loans', 'remaining_amount')) {
+            $this->remaining_amount = $currentRemaining;
+        }
+        if ($currentRemaining <= 0) {
+            $this->status = 'completed';
+        }
+        $this->save();
+
+        return $installments->toArray();
+    }
 }

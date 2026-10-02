@@ -606,13 +606,12 @@ class LoanController extends Controller
             ], 404);
         }
 
+        $loan->recalculateSchedule();
+        $loan->load(['member', 'installments.teller', 'approver']);
+
         $originalAmount = (float) $loan->amount;
         $totalPaidPrincipal = (float) $loan->installments->where('status', 'paid')->sum('principal_amount');
-        if ($loan->remaining_principal !== null && $loan->remaining_principal < $originalAmount) {
-            $remainingBalance = max(0.0, round((float) $loan->remaining_principal, 2));
-        } else {
-            $remainingBalance = max(0.0, round($originalAmount - $totalPaidPrincipal, 2));
-        }
+        $remainingBalance = (float) ($loan->remaining_principal ?? 0);
 
         $installments = $loan->installments->sortBy(function ($inst) {
             return $inst->paid_at ? $inst->paid_at->timestamp : ($inst->due_date ? $inst->due_date->timestamp : $inst->installment_number);
@@ -725,6 +724,9 @@ class LoanController extends Controller
             ], 404);
         }
 
+        $loan->recalculateSchedule();
+        $loan->load('installments.teller');
+
         $installments = $loan->installments->sortBy(function ($inst) {
             return $inst->paid_at ? $inst->paid_at->timestamp : ($inst->due_date ? $inst->due_date->timestamp : $inst->installment_number);
         })->values()->map(function (LoanInstallment $inst) {
@@ -783,15 +785,14 @@ class LoanController extends Controller
      */
     private function buildLoanCardData(Loan $loan): array
     {
+        $loan->recalculateSchedule();
+        $loan->load(['member', 'installments.teller', 'installments.paidByUser']);
+
         $member = $loan->member;
         $tenor  = (int) ($loan->tenor_months ?? $loan->duration_months ?? 12);
         $originalAmount = (float) $loan->amount;
         $totalPaidPrincipal = (float) $loan->installments->where('status', 'paid')->sum('principal_amount');
-        if ($loan->remaining_principal !== null && $loan->remaining_principal < $originalAmount) {
-            $remainingBalance = max(0.0, round((float) $loan->remaining_principal, 2));
-        } else {
-            $remainingBalance = max(0.0, round($originalAmount - $totalPaidPrincipal, 2));
-        }
+        $remainingBalance = (float) ($loan->remaining_principal ?? 0);
 
         $dueDateStr = $loan->due_date ? (is_string($loan->due_date) ? substr($loan->due_date, 0, 10) : $loan->due_date->format('Y-m-d')) : null;
 
@@ -1332,6 +1333,9 @@ class LoanController extends Controller
                 'remaining_amount'    => $newRemainingPrincipal,
                 'status'              => $newRemainingPrincipal <= 0 ? 'completed' : $loan->status,
             ]);
+
+            $loan->recalculateSchedule();
+            $newRemainingPrincipal = (float) $loan->remaining_principal;
 
             // 3. Catat Transaksi Kas Masuk (KM approved)
             $kasAccount = $this->getKasAccount();

@@ -223,33 +223,86 @@ class BukuPutihLedgerService
             ->orderBy('id', 'asc')
             ->get();
 
-        // 1. Cek apakah anggota PERNAH melakukan transaksi kas riil (KM/KK) minimal 1 kali di dalam periode berjalan ini
-        $hasRealCashInPeriod = $allTrxs->contains(function ($trx) {
+        // 1. Dapatkan transaksi kasir riil pertama di periode berjalan (bukan Saldo Awal migrasi dan bukan BM bunga)
+        $realCashTrxs = $allTrxs->filter(function ($trx) {
             $desc  = strtolower($trx->description ?? '');
             $cat   = $trx->category ?? '';
             $type  = $trx->type ?? '';
+            $tNo   = (string) ($trx->transaction_number ?? '');
+            $rNo   = (string) ($trx->receipt_number ?? '');
+
             $isMemorial = ($trx->payment_method === 'memorial')
-                || str_starts_with((string) $trx->receipt_number, 'BM-INT')
-                || str_starts_with((string) $trx->receipt_number, 'INT-')
-                || str_starts_with((string) $trx->receipt_number, 'BM-')
+                || str_starts_with($rNo, 'BM-INT')
+                || str_starts_with($rNo, 'INT-')
+                || str_starts_with($rNo, 'BM-')
                 || str_contains($desc, 'bunga')
                 || str_contains($desc, 'jasa')
                 || $cat === 'bunga_simpanan';
 
+            $isMigration = str_contains($desc, 'saldo awal')
+                || str_starts_with($tNo, 'TRX-IMP-')
+                || str_starts_with($tNo, 'TRX-BP-INIT-')
+                || str_starts_with($rNo, 'KM-IMP-P-')
+                || str_starts_with($rNo, 'KM-BP-');
+
             $isRealCash = in_array($type, ['deposit', 'in', 'kas_masuk', 'KM', 'withdrawal', 'out', 'kas_keluar', 'KK']);
 
-            return !$isMemorial && $isRealCash;
+            return !$isMemorial && !$isMigration && $isRealCash;
+        })->sortBy(function ($t) {
+            return Carbon::parse($t->transaction_date)->toDateString();
         });
 
+        $hasRealCashInPeriod = $realCashTrxs->isNotEmpty();
+        $firstRealCashDate   = $hasRealCashInPeriod
+            ? Carbon::parse($realCashTrxs->first()->transaction_date)->toDateString()
+            : null;
+
+        // Jika anggota memiliki transaksi kasir riil dalam 6 bulan sebelum awal tahun buku, maka aktif sejak awal tahun buku
+        $sixMonthsPrior = Carbon::parse($firstCycleStart)->subMonths(6)->toDateString();
+        $hasPriorCash = Transaction::where('member_id', $member->id)
+            ->where('book_type', 'BUKU_PUTIH')
+            ->where('status', 'approved')
+            ->whereDate('transaction_date', '>=', $sixMonthsPrior)
+            ->whereDate('transaction_date', '<', $firstCycleStart)
+            ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM', 'withdrawal', 'out', 'kas_keluar', 'KK'])
+            ->where(function ($q) {
+                $q->whereNull('description')
+                  ->orWhere(function ($sub) {
+                      $sub->where('description', 'not like', '%Saldo Awal%')
+                          ->where('description', 'not like', '%saldo awal%');
+                  });
+            })
+            ->where(function ($q) {
+                $q->whereNull('receipt_number')
+                  ->orWhere(function ($sub) {
+                      $sub->where('receipt_number', 'not like', 'KM-IMP-P-%')
+                          ->where('receipt_number', 'not like', 'KM-BP-%')
+                          ->where('receipt_number', 'not like', 'BM-%')
+                          ->where('receipt_number', 'not like', 'INT-%');
+                  });
+            })
+            ->exists();
+
+        if ($hasPriorCash) {
+            $firstRealCashDate = $firstCycleStart;
+            $hasRealCashInPeriod = true;
+        }
+
         $rawStatus = strtolower(trim((string) ($member->status ?? '')));
-        $inactiveStatuses = ['inactive', 'non-active', 'pasif', 'keluar', 'resigned', 'blokir', '0'];
+        $inactiveStatuses = [
+            'inactive', 'non-active', 'pasif', 'keluar', 'resigned', 'blokir', '0',
+            'tidak_aktif', 'tidak-aktif', 'non_aktif', 'nonaktif'
+        ];
         $isExplicitlyInactive = in_array($rawStatus, $inactiveStatuses, true);
 
+        // Cek Status Keaktifan Rekening Buku Putih Khusus
+        $isWhiteBookDisabled = ($member->is_white_book_active === false || $member->is_white_book_active === 0 || $member->is_white_book_active === '0');
+
         // ATURAN STATUS KEAKTIFAN 1 PERIODE:
-        // - Jika anggota secara eksplisit nonaktif ($isExplicitlyInactive), status WAJIB TIDAK AKTIF dan bunga Rp 0.
+        // - Jika anggota secara eksplisit nonaktif ($isExplicitlyInactive) atau Buku Putih dimatikan ($isWhiteBookDisabled), status WAJIB TIDAK AKTIF dan bunga Rp 0.
         // - Jika anggota PERNAH setor/tarik kas (KM/KK) minimal 1x di periode berjalan ini, status WAJIB AKTIF.
         // - Jika TIDAK PERNAH bertransaksi kas sama sekali di periode berjalan ini, status TIDAK AKTIF dan bunga Rp 0.
-        $isPeriodActive = !$isExplicitlyInactive && $hasRealCashInPeriod;
+        $isPeriodActive = !$isExplicitlyInactive && !$isWhiteBookDisabled && $hasRealCashInPeriod;
 
         $cycles                = [];
         $allFlatTransactions   = [];
@@ -269,6 +322,8 @@ class BukuPutihLedgerService
             'interest'        => 0.0,
             'balance'         => $initialBalance,
         ];
+
+        $hasPriorDistributedBm = false;
 
         foreach ($fiscalMonths as $fm) {
             $m      = $fm['month'];
@@ -303,29 +358,6 @@ class BukuPutihLedgerService
 
             if ($cycleTrxs->isNotEmpty()) {
                 $activeMonthsCount++;
-            }
-
-            // 3. Hitung Jasa Bunga 0.6%:
-            // Bunga diberikan secara penuh jika status periode AKTIF dan terdapat saldo dasar mengendap > 0
-            $targetYm = Carbon::createFromDate($y, $m, 1)->format('Ym');
-            $existingBmTrx = $allTrxs->first(function ($trx) use ($mStart, $mEnd, $targetYm) {
-                $desc  = strtolower($trx->description ?? '');
-                $cat   = $trx->category ?? '';
-                $rNo   = (string) ($trx->receipt_number ?? '');
-                $tDate = Carbon::parse($trx->transaction_date)->toDateString();
-
-                $isBm = (str_starts_with($rNo, 'BM-INT-' . $targetYm) || str_starts_with($rNo, 'INT-' . $targetYm) || $cat === 'bunga_simpanan')
-                    && ($trx->payment_method === 'memorial' || str_contains($desc, 'bunga') || str_contains($desc, 'jasa'));
-
-                return $isBm && $tDate >= $mStart && $tDate <= $mEnd;
-            });
-
-            if ($existingBmTrx && (float) $existingBmTrx->amount > 0) {
-                $jasaBulanIni = (float) $existingBmTrx->amount;
-            } else {
-                $jasaBulanIni = ($isPeriodActive && $saldoDasarBunga > 0)
-                    ? (float) round($saldoDasarBunga * self::INTEREST_RATE, 2)
-                    : 0.0;
             }
 
             $cycleRows           = [];
@@ -384,9 +416,49 @@ class BukuPutihLedgerService
                 $allFlatTransactions[] = $rowItem;
             }
 
-            // Injeksi baris BM Bunga 0.6% HANYA jika status periode AKTIF dan terdapat nilai bunga
+            // 3. ATURAN PENENTUAN HAK BUNGA 0.6% PADA SIKLUS INI:
+            // - Jika anggota eksplisit non-aktif atau Buku Putih dimatikan -> Bunga = 0
+            // - Jika ada transaksi BM bunga yang sudah tercatat di DB (amount > 0), ambil nilai BM tersebut.
+            // - Jika anggota baru aktif setelah setoran kasir baru ($firstRealCashDate),
+            //   siklus yang berakhir SEBELUM tanggal setoran pertama ($mEnd < $firstRealCashDate)
+            //   TETAP NONAKTIF dan Bunga = 0 (TIDAK BERLAKU RETROAKTIF/SURUT KE MASA LALU).
+            // - Hak bunga 0.6% baru mulai aktif pada siklus di mana setoran tersebut tercatat ($mEnd >= $firstRealCashDate) dan seterusnya,
+            //   atau jika siklus sebelumnya sudah pernah aktif membagikan bunga ($hasPriorDistributedBm).
+            $isCycleEligibleForInterest = !$isExplicitlyInactive && !$isWhiteBookDisabled && (
+                ($firstRealCashDate !== null && $mEnd >= $firstRealCashDate) || $hasPriorDistributedBm
+            );
+
+            $targetYm = Carbon::createFromDate($y, $m, 1)->format('Ym');
+            $existingBmTrx = $allTrxs->first(function ($trx) use ($mStart, $mEnd, $targetYm) {
+                $desc  = strtolower($trx->description ?? '');
+                $cat   = $trx->category ?? '';
+                $rNo   = (string) ($trx->receipt_number ?? '');
+                $tDate = Carbon::parse($trx->transaction_date)->toDateString();
+
+                $isBm = (str_starts_with($rNo, 'BM-INT-' . $targetYm) || str_starts_with($rNo, 'INT-' . $targetYm) || $cat === 'bunga_simpanan')
+                    && ($trx->payment_method === 'memorial' || str_contains($desc, 'bunga') || str_contains($desc, 'jasa'));
+
+                return $isBm && $tDate >= $mStart && $tDate <= $mEnd;
+            });
+
+            if ($isExplicitlyInactive || $isWhiteBookDisabled) {
+                $jasaBulanIni = 0.0;
+                $isCycleEligibleForInterest = false;
+            } elseif ($existingBmTrx && (float) $existingBmTrx->amount > 0) {
+                $jasaBulanIni = (float) $existingBmTrx->amount;
+                $isCycleEligibleForInterest = true;
+                $hasPriorDistributedBm = true;
+            } elseif (!$isCycleEligibleForInterest) {
+                $jasaBulanIni = 0.0;
+            } else {
+                $jasaBulanIni = ($saldoDasarBunga > 0)
+                    ? (float) round($saldoDasarBunga * self::INTEREST_RATE, 2)
+                    : 0.0;
+            }
+
+            // Injeksi baris BM Bunga 0.6% HANYA jika siklus berhak bunga dan terdapat nilai bunga
             $sortedCycleRows = $cycleRows;
-            if ($isPeriodActive && ($jasaBulanIni > 0 || $existingBmTrx)) {
+            if ($isCycleEligibleForInterest && $jasaBulanIni > 0) {
                 $bmVoucher = $existingBmTrx ? ($existingBmTrx->receipt_number ?: "BM-INT-{$targetYm}") : "BM-INT-{$targetYm}";
                 $bmDate    = $existingBmTrx ? Carbon::parse($existingBmTrx->transaction_date)->toDateString() : Carbon::createFromDate($y, $m, 20)->toDateString();
 
@@ -477,7 +549,7 @@ class BukuPutihLedgerService
         }
 
         // Evaluasi Status Keaktifan Final Menggunakan Helper evaluateMembershipStatus
-        $membershipStatus = $this->evaluateMembershipStatus($cycles, $isExplicitlyInactive);
+        $membershipStatus = $this->evaluateMembershipStatus($cycles, $isExplicitlyInactive, $isWhiteBookDisabled);
         $statusKeaktifan  = $membershipStatus['status_keaktifan'];
         $isActiveMember   = $membershipStatus['is_active'];
         $statusLabel      = $isActiveMember ? 'AKTIF' : 'TIDAK AKTIF';
@@ -498,6 +570,8 @@ class BukuPutihLedgerService
             'status_keaktifan'                 => $statusKeaktifan,
             'is_active'                        => $isActiveMember,
             'is_aktif'                         => $isActiveMember,
+            'is_white_book_active'             => !$isWhiteBookDisabled,
+            'white_book_active'                => !$isWhiteBookDisabled,
             'active_months_count'              => $activeMonthsCount,
             'passive_months_count'             => $passiveMonthsCount,
             'consecutive_inactive_months'      => $consecutiveInactive,
@@ -531,6 +605,8 @@ class BukuPutihLedgerService
             'status_keaktifan'             => $statusKeaktifan,
             'is_active'                    => $isActiveMember,
             'is_aktif'                     => $isActiveMember,
+            'is_white_book_active'         => !$isWhiteBookDisabled,
+            'white_book_active'            => !$isWhiteBookDisabled,
             'active_months_count'          => $activeMonthsCount,
             'passive_months_count'         => $passiveMonthsCount,
             'consecutive_inactive_months'  => $consecutiveInactive,
@@ -558,6 +634,8 @@ class BukuPutihLedgerService
                 'status_keaktifan'     => $statusKeaktifan,
                 'is_active'            => $isActiveMember,
                 'is_aktif'             => $isActiveMember,
+                'is_white_book_active' => !$isWhiteBookDisabled,
+                'white_book_active'    => !$isWhiteBookDisabled,
                 'active_months_count'  => $activeMonthsCount,
                 'passive_months_count' => $passiveMonthsCount,
                 'consecutive_inactive_months' => $consecutiveInactive,
@@ -586,7 +664,7 @@ class BukuPutihLedgerService
      * 2. Status "TIDAK AKTIF (>6 Bln Pasif)" HANYA jika anggota TIDAK PERNAH menabung/bertransaksi sama sekali di periode ini.
      * 3. Transaksi bunga memorial (BM) JANGAN dianggap sebagai setoran kas anggota.
      */
-    public function evaluateMembershipStatus(array $monthlyCycles, bool $isExplicitlyInactive = false): array
+    public function evaluateMembershipStatus(array $monthlyCycles, bool $isExplicitlyInactive = false, bool $isWhiteBookDisabled = false): array
     {
         $consecutiveInactive = 0;
         $maxConsecutiveInactive = 0;
@@ -612,8 +690,8 @@ class BukuPutihLedgerService
         }
 
         // Evaluasi Status:
-        // Jika anggota secara eksplisit dinonaktifkan pengurus, status TIDAK AKTIF
-        if ($isExplicitlyInactive) {
+        // Jika anggota secara eksplisit dinonaktifkan pengurus atau Buku Putih dimatikan, status TIDAK AKTIF
+        if ($isExplicitlyInactive || $isWhiteBookDisabled) {
             $isActive = false;
             $statusKeaktifan = 'TIDAK AKTIF (Dinonaktifkan)';
             $statusLabel = 'TIDAK AKTIF';

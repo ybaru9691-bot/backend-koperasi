@@ -132,43 +132,61 @@ class BukuPutihLedgerController extends Controller
         try {
             $member = \App\Models\Member::findOrFail($id);
 
-            $inactiveStatuses = ['inactive', 'non-active', 'pasif', 'keluar', 'resigned', 'blokir', '0'];
-            $currentRaw = strtolower(trim((string) ($member->status ?? '')));
-            $currentIsInactive = in_array($currentRaw, $inactiveStatuses, true);
+            $inactiveStatuses = [
+                'inactive', 'non-active', 'pasif', 'keluar', 'resigned', 'blokir', '0',
+                'tidak_aktif', 'tidak-aktif', 'non_aktif', 'nonaktif', 'false', 'off'
+            ];
+            $activeStatuses = ['active', 'aktif', '1', 'true', 'on'];
 
-            // Input status: bisa string 'active'/'inactive'/'pasif'/'aktif', atau boolean is_active, atau toggle otomatis jika kosong
-            if ($request->has('status')) {
-                $requestedStatus = strtolower(trim((string) $request->input('status')));
-                if (in_array($requestedStatus, $inactiveStatuses, true) || $requestedStatus === 'false') {
-                    $newStatus = 'inactive';
+            $currentIsActive = ($member->is_white_book_active !== false && $member->is_white_book_active !== 0 && $member->is_white_book_active !== '0');
+
+            // 1. Prioritaskan jika request membawa boolean is_active / is_white_book_active / white_book_active
+            if ($request->has('is_active') || $request->has('is_white_book_active') || $request->has('white_book_active')) {
+                $rawBool = $request->input('is_white_book_active') ?? $request->input('white_book_active') ?? $request->input('is_active');
+                if ($rawBool === false || $rawBool === 0 || $rawBool === '0' || $rawBool === 'false') {
+                    $newWbActive = false;
+                } elseif ($rawBool === true || $rawBool === 1 || $rawBool === '1' || $rawBool === 'true') {
+                    $newWbActive = true;
                 } else {
-                    $newStatus = 'active';
+                    $newWbActive = $request->boolean('is_active');
                 }
-            } elseif ($request->has('is_active')) {
-                $newStatus = $request->boolean('is_active') ? 'active' : 'inactive';
+            } elseif ($request->has('status') || $request->has('status_buku_putih')) {
+                // 2. Jika membawa string status
+                $requestedStatus = strtolower(trim((string) ($request->input('status_buku_putih') ?? $request->input('status'))));
+                if (in_array($requestedStatus, $inactiveStatuses, true)) {
+                    $newWbActive = false;
+                } elseif (in_array($requestedStatus, $activeStatuses, true)) {
+                    $newWbActive = true;
+                } else {
+                    $newWbActive = true;
+                }
             } else {
-                // Auto toggle
-                $newStatus = $currentIsInactive ? 'active' : 'inactive';
+                // 3. Auto toggle jika tanpa parameter
+                $newWbActive = !$currentIsActive;
             }
 
-            $member->status = $newStatus;
+            // PERATURAN MUTLAK: Hanya ubah is_white_book_active, JANGAN mematikan members.status utama keanggotaan!
+            $member->is_white_book_active = $newWbActive;
+            if (empty($member->status) || in_array(strtolower($member->status), ['inactive', 'tidak_aktif', 'pasif'])) {
+                $member->status = 'active';
+            }
             $member->save();
 
             \Illuminate\Support\Facades\Cache::forget('member_' . $member->id);
 
-            $isActive = !in_array($newStatus, $inactiveStatuses, true);
-
             return response()->json([
                 'success' => true,
                 'status'  => 'success',
-                'message' => "Status keaktifan anggota {$member->name} berhasil diperbarui menjadi {$newStatus}.",
+                'message' => 'Status keaktifan Buku Putih berhasil diperbarui.',
                 'data'    => [
-                    'id'            => $member->id,
-                    'member_number' => $member->member_number,
-                    'name'          => $member->name,
-                    'status'        => $member->status,
-                    'is_active'     => $isActive,
-                    'status_label'  => $isActive ? 'AKTIF' : 'TIDAK AKTIF',
+                    'id'                   => $member->id,
+                    'member_number'        => $member->member_number,
+                    'name'                 => $member->name,
+                    'status'               => $member->status,
+                    'is_white_book_active' => (bool) $member->is_white_book_active,
+                    'white_book_active'    => (bool) $member->is_white_book_active,
+                    'is_active'            => (bool) $member->is_white_book_active,
+                    'status_label'         => $member->is_white_book_active ? 'AKTIF' : 'TIDAK AKTIF',
                 ],
             ], 200);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {

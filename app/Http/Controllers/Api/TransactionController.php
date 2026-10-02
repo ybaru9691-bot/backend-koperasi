@@ -351,6 +351,7 @@ class TransactionController extends Controller
                         if ($type === 'deposit') {
                             if ($columnToUpdate === 'daily_savings') {
                                 $member->has_buku_putih = true;
+                                $member->is_white_book_active = true;
                                 $member->save();
                             }
                             $member->increment($columnToUpdate, $amount);
@@ -520,6 +521,7 @@ class TransactionController extends Controller
                     if ($type === 'deposit') {
                         if ($columnToUpdate === 'daily_savings') {
                             $member->has_buku_putih = true;
+                            $member->is_white_book_active = true;
                             $member->save();
                         }
                         $member->increment($columnToUpdate, $amount);
@@ -649,6 +651,7 @@ class TransactionController extends Controller
                         $activeLoan->status = 'PAID_OFF';
                     }
                     $activeLoan->save();
+                    $activeLoan->recalculateSchedule();
                 }
             }
 
@@ -1262,6 +1265,7 @@ class TransactionController extends Controller
                             'remaining_amount'    => $newRemaining,
                             'status'              => $newRemaining <= 0 ? 'completed' : 'approved',
                         ]);
+                        $loan->recalculateSchedule();
                     }
                 }
             }
@@ -1749,6 +1753,7 @@ class TransactionController extends Controller
                     $loan->increment('remaining_principal', $principalPaid);
                     $loan->increment('remaining_amount', $principalPaid);
                     $loan->update(['status' => 'approved']);
+                    $loan->recalculateSchedule();
                 }
             }
         }

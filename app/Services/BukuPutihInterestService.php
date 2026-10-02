@@ -222,14 +222,20 @@ class BukuPutihInterestService
             $cutoffBalance = max(0.0, $currentDailySavings - $depAfter + $withAfter);
 
             $rawStatus = strtolower(trim((string) ($member->status ?? '')));
-            $inactiveStatuses = ['inactive', 'non-active', 'pasif', 'keluar', 'resigned', 'blokir', '0'];
+            $inactiveStatuses = [
+                'inactive', 'non-active', 'pasif', 'keluar', 'resigned', 'blokir', '0',
+                'tidak_aktif', 'tidak-aktif', 'non_aktif', 'nonaktif'
+            ];
             $isExplicitlyInactive = in_array($rawStatus, $inactiveStatuses, true);
+
+            // Cek Status Keaktifan Rekening Buku Putih Khusus
+            $isWhiteBookDisabled = ($member->is_white_book_active === false || $member->is_white_book_active === 0 || $member->is_white_book_active === '0');
 
             // Pengecekan riwayat mutasi transaksi 6 bulan terakhir s.d. cut-off date.
             $hasTxInWindow = isset($activeInSixMonths[$member->id])
                 || isset($recentMigrationMemberIds[$member->id])
                 || ($member->created_at && Carbon::parse($member->created_at)->toDateString() >= $sixMonthsStart && Carbon::parse($member->created_at)->toDateString() <= $cutoffDate);
-            $isDormant = $isExplicitlyInactive || !$hasTxInWindow;
+            $isDormant = $isExplicitlyInactive || $isWhiteBookDisabled || !$hasTxInWindow;
 
             if ($isDormant) {
                 $dormantCount++;
@@ -241,9 +247,10 @@ class BukuPutihInterestService
 
             // Kategori "Anggota Berhak Bunga" HANYA untuk anggota yang:
             // 1. Status TIDAK eksplisit non-aktif (!isExplicitlyInactive)
-            // 2. Memiliki mutasi transaksi dalam 6 bulan terakhir (!isDormant)
-            // 3. Saldo Simpanan Harian (Buku Putih) > 0 per tanggal cut-off
-            $isEligible = (!$isExplicitlyInactive && !$isDormant && $cutoffBalance > 0);
+            // 2. Status Rekening Buku Putih AKTIF (!isWhiteBookDisabled)
+            // 3. Memiliki mutasi transaksi dalam 6 bulan terakhir (!isDormant)
+            // 4. Saldo Simpanan Harian (Buku Putih) > 0 per tanggal cut-off
+            $isEligible = (!$isExplicitlyInactive && !$isWhiteBookDisabled && !$isDormant && $cutoffBalance > 0);
             $interest = $isEligible ? (float) round($cutoffBalance * self::INTEREST_RATE) : 0.0;
 
             if ($isEligible && $interest > 0) {
@@ -258,25 +265,43 @@ class BukuPutihInterestService
                 ?: ($member->member_number ? '2021-' . str_pad((string) $member->member_number, 4, '0', STR_PAD_LEFT) : null);
 
             $memberCalculations[] = [
-                'member_id'        => $member->id,
-                'member_number'    => $member->member_number,
-                'buku_putih_no'    => $bukuPutihNo,
-                'name'             => $member->name,
-                'nik'              => $member->nik,
-                'status'           => $member->status,
-                'has_buku_putih'   => (bool) ($member->has_buku_putih || $cutoffBalance > 0),
-                'daily_savings'    => $currentDailySavings,
-                'current_balance'  => $currentDailySavings,
-                'cutoff_balance'   => $cutoffBalance,
-                'interest_rate'    => self::INTEREST_RATE,
-                'interest_amount'  => $interest,
-                'interest'         => $interest,
-                'is_dormant'       => $isDormant,
-                'is_eligible'      => ($isEligible && $interest > 0),
+                'member_id'            => $member->id,
+                'member_number'        => $member->member_number,
+                'buku_putih_no'        => $bukuPutihNo,
+                'name'                 => $member->name,
+                'nik'                  => $member->nik,
+                'status'               => $member->status,
+                'is_white_book_active' => !$isWhiteBookDisabled,
+                'white_book_active'    => !$isWhiteBookDisabled,
+                'has_buku_putih'       => (bool) ($member->has_buku_putih || $cutoffBalance > 0),
+                'daily_savings'        => $currentDailySavings,
+                'current_balance'      => $currentDailySavings,
+                'cutoff_balance'       => $cutoffBalance,
+                'interest_rate'        => self::INTEREST_RATE,
+                'interest_amount'      => $interest,
+                'interest'             => $interest,
+                'is_dormant'           => $isDormant,
+                'is_eligible'          => ($isEligible && $interest > 0),
             ];
         }
 
         $passiveCount = count($members) - $eligibleCount;
+
+        $now = now();
+        $isCutoffReached = ($year < $now->year)
+            || ($year == $now->year && $month < $now->month)
+            || ($year == $now->year && $month == $now->month && $now->day >= 20);
+
+        $monthName = Carbon::createFromDate($year, $month, 1)->locale('id')->isoFormat('MMMM');
+        $cutoffStatus = $isCutoffReached
+            ? 'Sudah Cut-Off'
+            : 'Menunggu Cut-Off 20 ' . $monthName;
+
+        $canDistribute = $isCutoffReached && !$alreadyDistributed && !\App\Services\PeriodLockService::isLocked($dates['execution_date']);
+
+        $warningMessage = (!$isCutoffReached)
+            ? "Distribusi bunga periode berjalan belum dapat dilakukan sebelum tanggal cut-off (tanggal 20)."
+            : null;
 
         $summary = [
             'month'                  => $month,
@@ -305,6 +330,10 @@ class BukuPutihInterestService
             'total_interest'         => $totalInterestAmount,
             'total_interest_amount'  => $totalInterestAmount,
             'is_already_distributed' => $alreadyDistributed,
+            'is_cutoff_reached'      => $isCutoffReached,
+            'can_distribute'         => $canDistribute,
+            'cutoff_status'          => $cutoffStatus,
+            'warning_message'        => $warningMessage,
         ];
 
         return array_merge($summary, [
@@ -319,6 +348,14 @@ class BukuPutihInterestService
      */
     public function distribute(int $month, int $year, ?int $userId = null): array
     {
+        $now = now();
+        $isCurrentMonthPremature = ($year == $now->year && $month == $now->month && $now->day < 20);
+        $isFuturePeriod = ($year > $now->year) || ($year == $now->year && $month > $now->month);
+
+        if ($isCurrentMonthPremature || $isFuturePeriod) {
+            throw new \Exception("Distribusi bunga periode berjalan belum dapat dilakukan sebelum tanggal cut-off (tanggal 20).", 422);
+        }
+
         $dates = $this->resolveDates($month, $year);
         $executionDate = $dates['execution_date'];
 

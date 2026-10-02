@@ -289,16 +289,23 @@ class BukuPutihLedgerTest extends TestCase
         $this->assertEquals(50000.00, $data['opening_balance']);
         $this->assertEquals(150000.00, $data['total_deposit']);
 
-        // Bunga 0,6% mengalir penuh 12 bulan:
-        // Total Jasa = Rp 11.074 (pembulatan sen: 11.074,24)
-        // Saldo Akhir = Rp 211.074 (pembulatan sen: 211.074,24)
-        $this->assertEquals(11074.24, round($data['total_interest'], 2));
-        $this->assertEquals(211074.24, round($data['closing_balance'], 2));
+        // Bunga 0,6% dimulai dari siklus September (saat setoran baru dilakukan) dan seterusnya:
+        // Bulan-bulan sebelum setoran (Juni, Juli, Agustus) = Rp 0 (TIDAK berlaku surut/retroaktif)
+        // Total Jasa = Rp 10.118,73
+        // Saldo Akhir = Rp 210.118,73
+        $this->assertEquals(10118.73, round($data['total_interest'], 2));
+        $this->assertEquals(210118.73, round($data['closing_balance'], 2));
 
-        // Verifikasi tidak ada bulan yang bunganya dipotong / 0 (selama saldo > 0)
-        foreach ($data['cycles'] as $cycle) {
-            $this->assertGreaterThan(0, $cycle['interest']);
-        }
+        // Verifikasi bulan sebelum setoran bernilai 0 dan bulan sejak setoran bernilai > 0
+        $jun = collect($data['cycles'])->firstWhere('month', 6);
+        $jul = collect($data['cycles'])->firstWhere('month', 7);
+        $agu = collect($data['cycles'])->firstWhere('month', 8);
+        $sep = collect($data['cycles'])->firstWhere('month', 9);
+
+        $this->assertEquals(0.0, $jun['interest']);
+        $this->assertEquals(0.0, $jul['interest']);
+        $this->assertEquals(0.0, $agu['interest']);
+        $this->assertEquals(300.00, $sep['interest']);
     }
 
     public function test_member_resets_inactivity_counter_on_new_cash_transaction(): void

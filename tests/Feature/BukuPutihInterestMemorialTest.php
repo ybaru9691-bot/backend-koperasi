@@ -394,4 +394,51 @@ class BukuPutihInterestMemorialTest extends TestCase
         $pdfRes->assertStatus(200);
         $this->assertEquals('application/pdf', $pdfRes->headers->get('content-type'));
     }
+
+    public function test_distribute_interest_before_cutoff_date_is_blocked_with_422()
+    {
+        Sanctum::actingAs($this->manager);
+
+        // Current date is 2026-10-02 (before 20 October cutoff)
+        // Attempting to distribute October 2026 interest must fail with 422
+        $response = $this->postJson('/api/manager/interest/distribute-buku-putih', [
+            'month' => 10,
+            'year'  => 2026,
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'status'  => 'error',
+                'message' => 'Distribusi bunga periode berjalan belum dapat dilakukan sebelum tanggal cut-off (tanggal 20).'
+            ]);
+
+        // Attempting to trigger via manager dashboard controller endpoint also fails with 422
+        $mgrResponse = $this->postJson('/api/manager/trigger-monthly-interest', [
+            'month' => 10,
+            'year'  => 2026,
+        ]);
+
+        $mgrResponse->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'status'  => 'error',
+                'message' => 'Gagal menjalankan pembagian bunga: Distribusi bunga periode berjalan belum dapat dilakukan sebelum tanggal cut-off (tanggal 20).'
+            ]);
+    }
+
+    public function test_preview_before_cutoff_date_contains_cutoff_status_and_warning()
+    {
+        Sanctum::actingAs($this->manager);
+
+        // Preview October 2026 (day < 20)
+        $response = $this->getJson('/api/manager/interest/preview?month=10&year=2026');
+        $response->assertStatus(200);
+
+        $summary = $response->json('data.summary');
+        $this->assertFalse($summary['is_cutoff_reached']);
+        $this->assertFalse($summary['can_distribute']);
+        $this->assertEquals('Menunggu Cut-Off 20 Oktober', $summary['cutoff_status']);
+        $this->assertStringContainsString('sebelum tanggal cut-off', $summary['warning_message']);
+    }
 }

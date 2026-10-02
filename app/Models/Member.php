@@ -68,6 +68,7 @@ class Member extends Authenticatable
         'buku_putih_no',
         'has_buku_biru',
         'has_buku_putih',
+        'is_white_book_active',
         'created_at',
         'updated_at',
     ];
@@ -112,18 +113,19 @@ class Member extends Authenticatable
     ];
 
     protected $casts = [
-        'date_of_birth'      => 'date:Y-m-d',
-        'heir_date_of_birth' => 'date:Y-m-d',
-        'registration_fee'   => 'decimal:2',
-        'principal_savings'  => 'decimal:2',
-        'mandatory_savings'  => 'decimal:2',
-        'voluntary_savings'  => 'decimal:2',
-        'daily_savings'      => 'decimal:2',
-        'social_fund'        => 'decimal:2',
-        'grief_fund'         => 'decimal:2',
-        'password'           => 'hashed',
-        'has_buku_biru'      => 'boolean',
-        'has_buku_putih'     => 'boolean',
+        'date_of_birth'        => 'date:Y-m-d',
+        'heir_date_of_birth'   => 'date:Y-m-d',
+        'registration_fee'     => 'decimal:2',
+        'principal_savings'    => 'decimal:2',
+        'mandatory_savings'    => 'decimal:2',
+        'voluntary_savings'    => 'decimal:2',
+        'daily_savings'        => 'decimal:2',
+        'social_fund'          => 'decimal:2',
+        'grief_fund'           => 'decimal:2',
+        'password'             => 'hashed',
+        'has_buku_biru'        => 'boolean',
+        'has_buku_putih'       => 'boolean',
+        'is_white_book_active' => 'boolean',
     ];
 
     
