@@ -21,6 +21,7 @@ return [
 
     'allowed_origins' => [
         'https://koperasi-frontend-production.up.railway.app',
+        'https://koperasiapp-production.up.railway.app',
         'http://localhost:3000',
         'http://localhost:8080',
         'http://10.0.2.2:*',
