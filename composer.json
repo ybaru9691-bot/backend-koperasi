@@ -87,13 +87,3 @@
     "minimum-stability": "stable",
     "prefer-stable": true
 }
-{
-  "buildPacks": [
-    {
-      "provider": "railpack",
-      "config": {
-        "phpExtensions": ["gd", "zip"]
-      }
-    }
-  ]
-}
