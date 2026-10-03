@@ -19,16 +19,24 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'https://koperasi-frontend-production.up.railway.app',
+        'http://localhost:3000',
+        'http://localhost:8080',
+        'http://10.0.2.2:*',
+    ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#https?://.*\.up\.railway\.app#',
+    ],
 
     'allowed_headers' => ['*'],
 
-    'exposed_headers' => [],
+    'exposed_headers' => ['Authorization', 'X-Total-Count'],
 
     'max_age' => 0,
 
     'supports_credentials' => true,
 
 ];
+
