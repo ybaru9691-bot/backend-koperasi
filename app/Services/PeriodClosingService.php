@@ -18,6 +18,9 @@ class PeriodClosingService
 {
     public const LOCKED_MESSAGE = 'Periode akuntansi telah ditutup dan dikunci. Transaksi pada tanggal ini tidak dapat diubah.';
 
+    protected static ?bool $hasAccountingPeriodsTable = null;
+    protected static ?bool $hasPeriodsTable = null;
+
     /**
      * Memeriksa apakah suatu tanggal transaksi berada di dalam periode akuntansi yang berstatus LOCKED atau CLOSED.
      *
@@ -39,7 +42,10 @@ class PeriodClosingService
         }
 
         // 1. Cek tabel accounting_periods (Tutup Buku / Periode Akuntansi Kunci)
-        if (Schema::hasTable('accounting_periods')) {
+        if (static::$hasAccountingPeriodsTable === null) {
+            static::$hasAccountingPeriodsTable = Schema::hasTable('accounting_periods');
+        }
+        if (static::$hasAccountingPeriodsTable) {
             $isLockedAccounting = DB::table('accounting_periods')
                 ->where(function ($q) {
                     $q->where('is_locked', true)
@@ -55,7 +61,10 @@ class PeriodClosingService
         }
 
         // 2. Cek tabel periods (Tutup Buku / Periode Akuntansi Kunci)
-        if (Schema::hasTable('periods')) {
+        if (static::$hasPeriodsTable === null) {
+            static::$hasPeriodsTable = Schema::hasTable('periods');
+        }
+        if (static::$hasPeriodsTable) {
             $isLockedPeriod = DB::table('periods')
                 ->where(function ($q) {
                     $q->where('is_locked', true)

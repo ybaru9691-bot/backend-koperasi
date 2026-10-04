@@ -7,6 +7,7 @@ use App\Models\JournalDetail;
 use App\Models\ChartOfAccount;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -74,21 +75,41 @@ class TabelarisReportService
         // 1. Query Transaksi Berjalan (Approved)
         $query = Transaction::query()
             ->with([
-                'member',
-                'account',
-                'journalEntry.details.account'
+                'member:id,name,member_number',
+                'account:id,account_name,account_code',
+                'journalEntry.details.account:id,account_code,account_type'
             ])
             ->where('status', 'approved');
 
-        if ($startDate) {
-            $query->whereRaw("DATE(COALESCE(transaction_date, created_at)) >= ?", [$startDate]);
-        }
-        if ($endDate) {
-            $query->whereRaw("DATE(COALESCE(transaction_date, created_at)) <= ?", [$endDate]);
+        if ($startDate && $endDate) {
+            $query->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('transaction_date', [$startDate, $endDate])
+                  ->orWhere(function ($sub) use ($startDate, $endDate) {
+                      $sub->whereNull('transaction_date')
+                          ->whereDate('created_at', '>=', $startDate)
+                          ->whereDate('created_at', '<=', $endDate);
+                  });
+            });
+        } elseif ($startDate) {
+            $query->where(function ($q) use ($startDate) {
+                $q->where('transaction_date', '>=', $startDate)
+                  ->orWhere(function ($sub) use ($startDate) {
+                      $sub->whereNull('transaction_date')
+                          ->whereDate('created_at', '>=', $startDate);
+                  });
+            });
+        } elseif ($endDate) {
+            $query->where(function ($q) use ($endDate) {
+                $q->where('transaction_date', '<=', $endDate)
+                  ->orWhere(function ($sub) use ($endDate) {
+                      $sub->whereNull('transaction_date')
+                          ->whereDate('created_at', '<=', $endDate);
+                  });
+            });
         }
 
         $transactions = $query
-            ->orderByRaw("COALESCE(transaction_date, created_at) ASC")
+            ->orderBy('transaction_date', 'asc')
             ->orderBy('id', 'asc')
             ->get();
 
@@ -110,18 +131,60 @@ class TabelarisReportService
         // 2. Query SALDO HAL LALU (Kumulatif Transaksi Sebelum $startDate)
         $saldoHalLalu = $this->getEmptyNumericSummaryArray();
         if ($startDate) {
-            $prevTransactions = Transaction::query()
-                ->with(['journalEntry.details.account'])
-                ->where('status', 'approved')
-                ->whereRaw("DATE(COALESCE(transaction_date, created_at)) < ?", [$startDate])
-                ->get();
+            $cacheVersion = Cache::get('tabelaris_cache_version', '1');
+            $cacheKey = "tabelaris_saldo_hal_lalu_{$startDate}_{$cacheVersion}";
 
-            foreach ($prevTransactions as $pt) {
-                $pRow = $this->mapTransactionToTabelarisRow($pt);
-                foreach (array_keys($saldoHalLalu) as $key) {
-                    $saldoHalLalu[$key] += (float) ($pRow[$key] ?? 0.0);
+            $saldoHalLalu = Cache::remember($cacheKey, now()->addHours(6), function () use ($startDate) {
+                $summary = $this->getEmptyNumericSummaryArray();
+
+                // Cek cepat keberadaan transaksi sebelum $startDate (memanfaatkan indeks status & transaction_date)
+                $hasPrev = Transaction::query()
+                    ->where('status', 'approved')
+                    ->where(function ($q) use ($startDate) {
+                        $q->where('transaction_date', '<', $startDate)
+                          ->orWhere(function ($sub) use ($startDate) {
+                              $sub->whereNull('transaction_date')
+                                  ->whereDate('created_at', '<', $startDate);
+                          });
+                    })
+                    ->exists();
+
+                if (!$hasPrev) {
+                    return $summary;
                 }
-            }
+
+                // Chunk transaksi historis secara hemat memori & bebas N+1 query
+                Transaction::query()
+                    ->select([
+                        'id', 'type', 'amount', 'description', 'book_type',
+                        'member_id', 'transaction_date', 'created_at'
+                    ])
+                    ->with([
+                        'journalEntry:id,transaction_id',
+                        'journalEntry.details:id,journal_entry_id,account_id,debit,credit,description',
+                        'journalEntry.details.account:id,account_code,account_type'
+                    ])
+                    ->where('status', 'approved')
+                    ->where(function ($q) use ($startDate) {
+                        $q->where('transaction_date', '<', $startDate)
+                          ->orWhere(function ($sub) use ($startDate) {
+                              $sub->whereNull('transaction_date')
+                                  ->whereDate('created_at', '<', $startDate);
+                          });
+                    })
+                    ->orderBy('transaction_date', 'asc')
+                    ->orderBy('id', 'asc')
+                    ->chunk(250, function ($prevChunk) use (&$summary) {
+                        foreach ($prevChunk as $pt) {
+                            $pRow = $this->mapTransactionToTabelarisRow($pt, true);
+                            foreach (array_keys($summary) as $key) {
+                                $summary[$key] += (float) ($pRow[$key] ?? 0.0);
+                            }
+                        }
+                    });
+
+                return $summary;
+            });
         }
 
         // 3. Hitung JUMLAH S/D HAL INI (Baris 1 + Baris 2)
@@ -423,7 +486,7 @@ class TabelarisReportService
     /**
      * Memetakan satu record transaksi ke dalam format baris 29 kolom tabelaris (Zero Diff Guarded).
      */
-    public function mapTransactionToTabelarisRow(Transaction $t): array
+    public function mapTransactionToTabelarisRow(Transaction $t, bool $summaryOnly = false): array
     {
         $type = strtolower($t->type ?? '');
         $isKM = in_array($type, ['deposit', 'in', 'kas_masuk', 'km']);
@@ -435,11 +498,11 @@ class TabelarisReportService
 
         $row = [
             'id'                => $t->id,
-            'tgl'               => $t->transaction_date ? Carbon::parse($t->transaction_date)->format('d/m/Y') : ($t->created_at ? $t->created_at->format('d/m/Y') : '-'),
-            'transaction_date'  => $t->transaction_date ? Carbon::parse($t->transaction_date)->format('Y-m-d') : ($t->created_at ? $t->created_at->format('Y-m-d') : null),
-            'no_bukti'          => $t->receipt_number ?: ($t->formatted_receipt_no ?: $t->transaction_number),
-            'nba'               => $t->member ? ($t->member->member_number ?: '-') : '-',
-            'nama'              => $t->member ? $t->member->name : ($t->description ?: '[Penyesuaian Manajer]'),
+            'tgl'               => $summaryOnly ? '-' : ($t->transaction_date ? Carbon::parse($t->transaction_date)->format('d/m/Y') : ($t->created_at ? $t->created_at->format('d/m/Y') : '-')),
+            'transaction_date'  => $summaryOnly ? null : ($t->transaction_date ? Carbon::parse($t->transaction_date)->format('Y-m-d') : ($t->created_at ? $t->created_at->format('Y-m-d') : null)),
+            'no_bukti'          => $summaryOnly ? '-' : ($t->receipt_number ?: ($t->formatted_receipt_no ?: $t->transaction_number)),
+            'nba'               => $summaryOnly ? '-' : ($t->member ? ($t->member->member_number ?: '-') : '-'),
+            'nama'              => $summaryOnly ? '-' : ($t->member ? $t->member->name : ($t->description ?: '[Penyesuaian Manajer]')),
             'description'       => $t->description,
             'type'              => $t->type,
 

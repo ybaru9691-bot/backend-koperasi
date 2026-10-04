@@ -987,11 +987,29 @@ class TransactionController extends Controller
             $endDate   = $request->filled('end_date') ? $this->extractTransactionDate($request->end_date) : null;
 
             if ($startDate && $endDate) {
-                $query->whereBetween($dateExpr, [$startDate, $endDate]);
+                $query->where(function ($q) use ($startDate, $endDate, $rawDateSql) {
+                    $q->whereBetween('transactions.transaction_date', [$startDate, $endDate])
+                      ->orWhere(function ($sub) use ($startDate, $endDate, $rawDateSql) {
+                          $sub->whereNull('transactions.transaction_date')
+                              ->whereRaw("{$rawDateSql} BETWEEN ? AND ?", [$startDate, $endDate]);
+                      });
+                });
             } elseif ($startDate) {
-                $query->whereRaw("{$rawDateSql} >= ?", [$startDate]);
+                $query->where(function ($q) use ($startDate, $rawDateSql) {
+                    $q->where('transactions.transaction_date', '>=', $startDate)
+                      ->orWhere(function ($sub) use ($startDate, $rawDateSql) {
+                          $sub->whereNull('transactions.transaction_date')
+                              ->whereRaw("{$rawDateSql} >= ?", [$startDate]);
+                      });
+                });
             } elseif ($endDate) {
-                $query->whereRaw("{$rawDateSql} <= ?", [$endDate]);
+                $query->where(function ($q) use ($endDate, $rawDateSql) {
+                    $q->where('transactions.transaction_date', '<=', $endDate)
+                      ->orWhere(function ($sub) use ($endDate, $rawDateSql) {
+                          $sub->whereNull('transactions.transaction_date')
+                              ->whereRaw("{$rawDateSql} <= ?", [$endDate]);
+                      });
+                });
             }
 
             if ($request->filled('status') && !in_array($request->status, ['Semua', 'All', 'all'])) {
@@ -1038,11 +1056,7 @@ class TransactionController extends Controller
                 });
             });
 
-            $rawOrderSql = $isSqlite
-                ? "COALESCE(transactions.transaction_date, transactions.created_at)"
-                : "COALESCE(transactions.transaction_date, CONVERT_TZ(transactions.created_at, '+00:00', '+07:00'), transactions.created_at)";
-
-            $transactions = $query->orderBy(DB::raw($rawOrderSql), 'desc')
+            $transactions = $query->orderBy('transactions.transaction_date', 'desc')
                                   ->orderBy('transactions.id', 'desc')
                                   ->paginate($perPage);
 
@@ -1403,7 +1417,9 @@ class TransactionController extends Controller
 
             DB::beginTransaction();
             $this->revertTransaction($transaction);
-            $transaction->delete();
+            Transaction::withoutPeriodLock(function () use ($transaction) {
+                $transaction->delete();
+            });
             DB::commit();
 
             return response()->json([
@@ -1436,11 +1452,13 @@ class TransactionController extends Controller
 
             DB::beginTransaction();
             $count = 0;
-            foreach ($transactions as $transaction) {
-                $this->revertTransaction($transaction);
-                $transaction->delete();
-                $count++;
-            }
+            Transaction::withoutPeriodLock(function () use ($transactions, &$count) {
+                foreach ($transactions as $transaction) {
+                    $this->revertTransaction($transaction);
+                    $transaction->delete();
+                    $count++;
+                }
+            });
             DB::commit();
 
             return response()->json(['success' => true, 'message' => "$count transaksi berhasil dihapus"], 200);
@@ -1740,7 +1758,15 @@ class TransactionController extends Controller
         }
 
         // 2. Revert status Loan Installment jika transaksi pembayaran cicilan pinjaman
-        if ($transaction->receipt_number) {
+        $descLower = strtolower($transaction->description ?? '');
+        $accCode = $transaction->account ? $transaction->account->account_code : '';
+        $isLoanPayment = ($accCode === '1024')
+            || str_contains($descLower, 'angsuran')
+            || str_contains($descLower, 'cicilan')
+            || str_contains($descLower, 'pokok pinjaman')
+            || ($transaction->category === 'angsuran_pinjaman');
+
+        if ($transaction->receipt_number && $isLoanPayment) {
             $installment = \App\Models\LoanInstallment::where('receipt_number', $transaction->receipt_number)->first();
             if ($installment) {
                 $principalPaid = (float) $installment->principal_amount;

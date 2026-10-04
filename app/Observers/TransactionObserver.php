@@ -84,6 +84,7 @@ class TransactionObserver
             : now()->format('Y_m');
 
         Cache::forget("dashboard_summary_{$periodKey}");
+        Cache::put('tabelaris_cache_version', time(), now()->addDays(7));
     }
 
     /**

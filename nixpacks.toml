@@ -4,3 +4,4 @@
 
 [variables]
 NIXPACKS_PHP_ROOT_DIR = "/app/public"
+PHP_CLI_SERVER_WORKERS = "10"
