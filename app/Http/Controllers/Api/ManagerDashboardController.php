@@ -29,7 +29,7 @@ class ManagerDashboardController extends Controller
     public function getDashboardSummary(): JsonResponse
     {
         try {
-            $data = Cache::remember('manager_dashboard_summary_data', 60, function () {
+            $data = Cache::remember('manager_dashboard_summary_data', now()->addMinutes(2), function () {
                 $balanceSummary = app(\App\Services\SavingsBalanceService::class)->getCoopSavingsSummary();
 
                 // 6. Pending Approvals (Transaksi & Pinjaman)
@@ -1229,7 +1229,19 @@ class ManagerDashboardController extends Controller
     public function getManagerMembers(Request $request): JsonResponse
     {
         try {
-            $query = Member::with(['loans.installments']);
+            $query = Member::select([
+                'id', 'user_id', 'member_number', 'nik', 'name', 'phone', 'church_sector',
+                'buku_putih_no', 'has_buku_biru', 'has_buku_putih', 'is_white_book_active',
+                'principal_savings', 'mandatory_savings', 'voluntary_savings', 'daily_savings',
+                'social_fund', 'grief_fund', 'status', 'created_at', 'updated_at'
+            ])->with([
+                'loans' => function ($q) {
+                    $q->select(['id', 'member_id', 'status', 'amount']);
+                },
+                'loans.installments' => function ($q) {
+                    $q->select(['id', 'loan_id', 'status', 'principal_amount']);
+                }
+            ]);
 
             // 1. Search filter (Nama dan Nomor Anggota)
             $search = trim((string) ($request->input('search') ?? $request->input('q') ?? $request->input('query') ?? $request->input('keyword') ?? ''));
@@ -1381,7 +1393,21 @@ class ManagerDashboardController extends Controller
     public function getManagerMemberDetail($id): JsonResponse
     {
         try {
-            $member = Member::with(['loans.installments', 'user'])->find($id);
+            $member = Member::with([
+                'loans' => function ($q) {
+                    $q->select([
+                        'id', 'member_id', 'loan_code', 'status', 'amount', 'interest_rate',
+                        'duration_months', 'approved_at', 'created_at'
+                    ]);
+                },
+                'loans.installments' => function ($q) {
+                    $q->select([
+                        'id', 'loan_id', 'installment_number', 'due_date', 'paid_at',
+                        'principal_amount', 'interest_amount', 'status'
+                    ]);
+                },
+                'user:id,name,email'
+            ])->find($id);
 
             if (!$member) {
                 return response()->json([

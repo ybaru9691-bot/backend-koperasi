@@ -1,0 +1,6 @@
+# Nixpacks configuration for Laravel deployment on Railway
+# Menggunakan Nginx + PHP-FPM bawaan container untuk melayani /app/public secara paralel (multi-process)
+# Mencegah serial blocking / single-thread dari php artisan serve
+
+[variables]
+NIXPACKS_PHP_ROOT_DIR = "/app/public"

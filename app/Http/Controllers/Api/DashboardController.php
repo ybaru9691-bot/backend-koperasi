@@ -198,7 +198,7 @@ class DashboardController extends Controller
     private function getAdminDashboard(): JsonResponse
     {
         try {
-            $data = Cache::remember('dashboard_summary_data', 60, function () {
+            $data = Cache::remember('dashboard_summary_data', now()->addMinutes(2), function () {
                 $balanceSummary = app(\App\Services\SavingsBalanceService::class)->getCoopSavingsSummary();
 
                 // 6. Data Cashflow Chart (6 Bulan Terakhir dalam 1 single grouped query)

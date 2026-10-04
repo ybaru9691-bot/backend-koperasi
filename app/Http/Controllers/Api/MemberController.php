@@ -47,7 +47,17 @@ class MemberController extends Controller
         $sort   = $request->input('sort');  
         $status = $request->input('status');
 
-        $query = Member::when($status, function ($q) use ($status) {
+        $query = Member::select([
+            'id', 'user_id', 'member_number', 'nik', 'name', 'email', 'phone', 'gender',
+            'place_of_birth', 'date_of_birth', 'occupation', 'education', 'family_status',
+            'church_sector', 'address', 'status', 'principal_savings', 'mandatory_savings',
+            'voluntary_savings', 'daily_savings', 'registration_fee', 'social_fund', 'grief_fund',
+            'buku_putih_no', 'has_buku_biru', 'has_buku_putih', 'is_white_book_active',
+            'heir_name', 'heir_relationship', 'heir_place_of_birth', 'heir_date_of_birth', 'heir_address',
+            'created_at', 'updated_at'
+        ])
+        ->with('user:id,name,email')
+        ->when($status, function ($q) use ($status) {
             $q->where('status', $status);
         })->when($search !== '', function ($query) use ($search) {
             $cleanNumber = ltrim($search, '0');
@@ -491,7 +501,15 @@ class MemberController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $member = Member::with('user')->find($id);
+        $member = Member::select([
+            'id', 'user_id', 'member_number', 'nik', 'name', 'email', 'phone', 'gender',
+            'place_of_birth', 'date_of_birth', 'occupation', 'education', 'family_status',
+            'church_sector', 'address', 'status', 'principal_savings', 'mandatory_savings',
+            'voluntary_savings', 'daily_savings', 'registration_fee', 'social_fund', 'grief_fund',
+            'buku_putih_no', 'has_buku_biru', 'has_buku_putih', 'is_white_book_active',
+            'heir_name', 'heir_relationship', 'heir_place_of_birth', 'heir_date_of_birth', 'heir_address',
+            'created_at', 'updated_at'
+        ])->with('user:id,name,email')->find($id);
 
         if (!$member) {
             return response()->json([
@@ -576,7 +594,11 @@ class MemberController extends Controller
      */
     public function getBalances($id): JsonResponse
     {
-        $member = Member::find($id);
+        $member = Member::select([
+            'id', 'name', 'member_number', 'buku_putih_no', 'has_buku_biru', 'has_buku_putih',
+            'daily_savings', 'principal_savings', 'mandatory_savings', 'voluntary_savings',
+            'social_fund', 'grief_fund', 'registration_fee'
+        ])->find($id);
 
         if (!$member) {
             return response()->json([
@@ -644,9 +666,25 @@ class MemberController extends Controller
      */
    public function showDetails(Request $request, $id): JsonResponse
     {
-        $member = Member::with(['user', 'transactions' => function ($q) {
-            $q->latest();
-        }])->find($id);
+        $member = Member::select([
+            'id', 'user_id', 'member_number', 'nik', 'name', 'email', 'phone', 'gender',
+            'place_of_birth', 'date_of_birth', 'occupation', 'education', 'family_status',
+            'church_sector', 'address', 'status', 'principal_savings', 'mandatory_savings',
+            'voluntary_savings', 'daily_savings', 'registration_fee', 'social_fund', 'grief_fund',
+            'buku_putih_no', 'has_buku_biru', 'has_buku_putih', 'is_white_book_active',
+            'heir_name', 'heir_relationship', 'heir_place_of_birth', 'heir_date_of_birth', 'heir_address',
+            'created_at', 'updated_at'
+        ])
+        ->with([
+            'user:id,name,email',
+            'transactions' => function ($q) {
+                $q->select([
+                    'id', 'transaction_number', 'receipt_number', 'member_id', 'account_id',
+                    'book_type', 'type', 'category', 'amount', 'beginning_balance', 'ending_balance',
+                    'payment_method', 'transaction_date', 'description', 'status', 'created_at', 'updated_at'
+                ])->latest();
+            }
+        ])->find($id);
 
         if (!$member) {
             return response()->json([
