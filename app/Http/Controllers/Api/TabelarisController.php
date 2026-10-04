@@ -43,7 +43,42 @@ class TabelarisController extends Controller
                 );
             }
 
-            $result = $this->tabelarisService->generateTabelaris($startDate, $endDate, $periodLabel);
+            // Batasi query range maksimal 31 hari agar tidak terjadi timeout 30 detik / memory exhaustion
+            if ($startDate && $endDate) {
+                $startCarbon = \Carbon\Carbon::parse($startDate);
+                $endCarbon   = \Carbon\Carbon::parse($endDate);
+
+                if ($startCarbon->gt($endCarbon)) {
+                    $endDate = $startDate;
+                    $endCarbon = $startCarbon->copy();
+                }
+
+                if ($startCarbon->diffInDays($endCarbon) > 31) {
+                    $endDate = $startCarbon->copy()->addDays(31)->format('Y-m-d');
+                    $periodLabel = "{$startDate} s/d {$endDate} (Maksimal 31 Hari)";
+                }
+            } else {
+                $startDate = date('Y-m-01');
+                $endDate   = date('Y-m-t');
+                $periodLabel = date('d F Y', strtotime($startDate)) . ' s/d ' . date('d F Y', strtotime($endDate));
+            }
+
+            // Bungkus kalkulasi berat dengan try-catch terpisah agar tidak fatal crash
+            try {
+                $result = $this->tabelarisService->generateTabelaris($startDate, $endDate, $periodLabel);
+            } catch (\Throwable $calcError) {
+                \Illuminate\Support\Facades\Log::error('Kalkulasi Jurnal Tabelaris gagal / timeout: ' . $calcError->getMessage(), [
+                    'start_date' => $startDate,
+                    'end_date'   => $endDate,
+                ]);
+
+                return response()->json([
+                    'status'  => 'error',
+                    'success' => false,
+                    'message' => 'Gagal mengambil data Jurnal Tabelaris: ' . $calcError->getMessage(),
+                    'data'    => null,
+                ], 500);
+            }
 
             return response()->json([
                 'status'  => 'success',
@@ -52,7 +87,7 @@ class TabelarisController extends Controller
                 'data'    => $result,
             ], 200);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return response()->json([
                 'status'  => 'error',
                 'success' => false,
@@ -92,6 +127,27 @@ class TabelarisController extends Controller
                     $startDate, $endDate, $period, $month, $year, $week
                 );
             }
+
+            // Batasi query range maksimal 31 hari agar tidak terjadi timeout 30 detik / memory exhaustion
+            if ($startDate && $endDate) {
+                $startCarbon = \Carbon\Carbon::parse($startDate);
+                $endCarbon   = \Carbon\Carbon::parse($endDate);
+
+                if ($startCarbon->gt($endCarbon)) {
+                    $endDate = $startDate;
+                    $endCarbon = $startCarbon->copy();
+                }
+
+                if ($startCarbon->diffInDays($endCarbon) > 31) {
+                    $endDate = $startCarbon->copy()->addDays(31)->format('Y-m-d');
+                    $periodLabel = "{$startDate} s/d {$endDate} (Maksimal 31 Hari)";
+                }
+            } else {
+                $startDate = date('Y-m-01');
+                $endDate   = date('Y-m-t');
+                $periodLabel = date('d F Y', strtotime($startDate)) . ' s/d ' . date('d F Y', strtotime($endDate));
+            }
+
             $spreadsheet = $this->tabelarisService->generateExcelSpreadsheet($startDate, $endDate, $periodLabel);
             $cleanLabel = preg_replace('/[^a-zA-Z0-9_-]/', '_', $periodLabel ?? date('Ymd'));
             $fileName   = 'Jurnal_Tabelaris_' . $cleanLabel . '.xlsx';
@@ -107,7 +163,7 @@ class TabelarisController extends Controller
             $response->headers->set('Pragma', 'public');
             return $response;
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengexport file Excel: ' . $e->getMessage(),
@@ -143,6 +199,27 @@ class TabelarisController extends Controller
                     $startDate, $endDate, $period, $month, $year, $week
                 );
             }
+
+            // Batasi query range maksimal 31 hari agar tidak terjadi timeout 30 detik / memory exhaustion
+            if ($startDate && $endDate) {
+                $startCarbon = \Carbon\Carbon::parse($startDate);
+                $endCarbon   = \Carbon\Carbon::parse($endDate);
+
+                if ($startCarbon->gt($endCarbon)) {
+                    $endDate = $startDate;
+                    $endCarbon = $startCarbon->copy();
+                }
+
+                if ($startCarbon->diffInDays($endCarbon) > 31) {
+                    $endDate = $startCarbon->copy()->addDays(31)->format('Y-m-d');
+                    $periodLabel = "{$startDate} s/d {$endDate} (Maksimal 31 Hari)";
+                }
+            } else {
+                $startDate = date('Y-m-01');
+                $endDate   = date('Y-m-t');
+                $periodLabel = date('d F Y', strtotime($startDate)) . ' s/d ' . date('d F Y', strtotime($endDate));
+            }
+
             $data = $this->tabelarisService->generateTabelaris($startDate, $endDate, $periodLabel);
 
             $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.jurnal_tabelaris_pdf', $data);
@@ -153,7 +230,7 @@ class TabelarisController extends Controller
 
             return $pdf->download($fileName);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mengexport file PDF: ' . $e->getMessage(),

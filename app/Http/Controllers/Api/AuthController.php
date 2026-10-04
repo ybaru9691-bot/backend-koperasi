@@ -44,7 +44,9 @@ class AuthController extends Controller
             ?? $request->input('phone')
             ?? $request->input('no_hp');
 
-        $secretInput = $request->input('password') ?? $request->input('pin');
+        $secretInput = $request->input('password') 
+        ?? $request->input('pin') 
+        ?? $request->input('pin_code');
 
         if (empty($loginInput) || empty($secretInput)) {
             return response()->json([

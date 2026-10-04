@@ -24,7 +24,7 @@ return [
 
     'exposed_headers' => ['Authorization', 'X-Total-Count'],
 
-    'max_age' => 0,
+    'max_age' => 86400,
 
     'supports_credentials' => true,
 
