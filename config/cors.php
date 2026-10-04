@@ -2,32 +2,22 @@
 
 return [
 
-    /*
-    |--------------------------------------------------------------------------
-    | Cross-Origin Resource Sharing (CORS) Configuration
-    |--------------------------------------------------------------------------
-    |
-    | Here you may configure your settings for cross-origin resource sharing
-    | or "CORS". This determines what cross-origin operations may execute
-    | in web browsers. You are free to adjust these settings as needed.
-    |
-    | To learn more: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
-    |
-    */
-
     'paths' => ['api/*', 'sanctum/csrf-cookie', '*'],
 
     'allowed_methods' => ['*'],
 
     'allowed_origins' => [
+        'https://koperasiapp-production.up.railway.app',
         'https://koperasi-frontend-production.up.railway.app',
         'http://localhost:3000',
         'http://localhost:8080',
-        'http://10.0.2.2:*',
+        'http://127.0.0.1:8000',
     ],
 
     'allowed_origins_patterns' => [
-        '#https?://.*\.up\.railway\.app#',
+        '#^https?://localhost:\d+$#',
+        '#^https?://127\.0\.0\.1:\d+$#',
+        '#^https://.*\.up\.railway\.app$#',
     ],
 
     'allowed_headers' => ['*'],
@@ -39,4 +29,3 @@ return [
     'supports_credentials' => true,
 
 ];
-
