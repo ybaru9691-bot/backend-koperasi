@@ -37,7 +37,7 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
-       'mysql' => [
+      'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
@@ -52,11 +52,10 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-           'options' => extension_loaded('pdo_mysql') ? array_filter([
+            'options' => extension_loaded('pdo_mysql') ? [
                 PDO::ATTR_EMULATE_PREPARES => true,
-                PDO::MYSQL_ATTR_SSL_CA => false,
                 PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false,
-            ]) : [],
+            ] : [],
         ],
 
         'mariadb' => [
