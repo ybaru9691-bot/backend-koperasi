@@ -52,7 +52,10 @@ return [
     'prefix_indexes' => true,
     'strict' => true,
     'engine' => null,
-    'options' => [], // Kosongkan sepenuhnya agar tidak meminta SSL
+    'options' => extension_loaded('pdo_mysql') ? [
+            \PDO::MYSQL_ATTR_SSL_CA => false,
+            \PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false,
+        ] : [],
 ],
         
 
