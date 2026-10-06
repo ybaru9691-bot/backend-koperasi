@@ -41,7 +41,7 @@ class MemberController extends Controller
 
     //beri list anggota untuk admin web
     // beri list anggota untuk admin web
-    public function index(Request $request): JsonResponse
+   public function index(Request $request): JsonResponse
     {
         $search = trim((string) ($request->input('search') ?? $request->input('q') ?? $request->input('query') ?? $request->input('keyword') ?? ''));
         $sort   = $request->input('sort');  
@@ -90,7 +90,7 @@ class MemberController extends Controller
         }
 
         $perPage = (int) ($request->input('per_page') ?? $request->input('limit') ?? 25);
-        $perPage = max(1, min($perPage, 100)); // Batas maksimum 100 data per halaman
+        $perPage = max(1, min($perPage, 100));
 
         $paginated = $query->paginate($perPage);
         $paginated->getCollection()->transform(function ($item) use ($appendsToHide) {
@@ -107,7 +107,6 @@ class MemberController extends Controller
             'from'           => $paginated->firstItem(),
             'last_page'      => $paginated->lastPage(),
             'last_page_url'  => $paginated->url($paginated->lastPage()),
-            'links'          => $paginated->linkCollection()->toArray(),
             'next_page_url'  => $paginated->nextPageUrl(),
             'path'           => $paginated->path(),
             'per_page'       => $paginated->perPage(),
