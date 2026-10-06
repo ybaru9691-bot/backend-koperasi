@@ -682,7 +682,7 @@ class MemberController extends Controller
                     'id', 'transaction_number', 'receipt_number', 'member_id', 'account_id',
                     'book_type', 'type', 'category', 'amount', 'beginning_balance', 'ending_balance',
                     'payment_method', 'transaction_date', 'description', 'status', 'created_at', 'updated_at'
-                ])->latest();
+                ])->latest()->limit(50);
             }
         ])->find($id);
 
@@ -701,26 +701,39 @@ class MemberController extends Controller
         $dailySavings     = (int) ($member->daily_savings ?? 0);
         $totalSaldo       = $simpananPokok + $simpananWajib + $simpananSukarela + $dailySavings;
 
-        // 1. Ambil Net Cashflow Manajer periode berjalan & tentukan persentase SHU (default 70%)
-        $totalKM = (float) \App\Models\Transaction::where('status', 'approved')
-            ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
-            ->sum('amount');
+        // 1 & 2. Ambil statistik global SHU (Net Cashflow & Total Uang Buku Biru) dengan Cache 30 menit
+        $shuGlobalStats = Cache::remember('global_shu_pool_stats', now()->addMinutes(30), function () {
+            $totalKM = (float) Transaction::where('status', 'approved')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->sum('amount');
 
-        $totalKK = (float) \App\Models\Transaction::where('status', 'approved')
-            ->whereIn('type', ['withdrawal', 'out', 'kas_keluar', 'KK'])
-            ->sum('amount');
+            $totalKK = (float) Transaction::where('status', 'approved')
+                ->whereIn('type', ['withdrawal', 'out', 'kas_keluar', 'KK'])
+                ->sum('amount');
 
-        $netCashflow = $totalKM - $totalKK;
-        if ($netCashflow <= 0) {
-            $netCashflow = 123250000; // Fallback default
-        }
+            $netCashflow = $totalKM - $totalKK;
+            if ($netCashflow <= 0) {
+                $netCashflow = 123250000.0; // Fallback default
+            }
 
-        $shuMemberPool = $netCashflow * 0.70;
+            $shuMemberPool = (float) ($netCashflow * 0.70);
 
-        // 2. Hitung Total Uang Buku Biru (Pokok + Wajib) Seluruh Anggota Aktif
-        $totalAllShares = (float) (Member::whereIn('status', ['active', 'ACTIVE'])
-            ->selectRaw('SUM(principal_savings + mandatory_savings) as total')
-            ->value('total') ?? 0.0);
+            $totalAllShares = (float) (Member::whereIn('status', ['active', 'ACTIVE'])
+                ->selectRaw('SUM(principal_savings + mandatory_savings) as total')
+                ->value('total') ?? 0.0);
+
+            return [
+                'totalKM'        => $totalKM,
+                'totalKK'        => $totalKK,
+                'totalAllShares' => $totalAllShares,
+                'shuMemberPool'  => $shuMemberPool,
+            ];
+        });
+
+        $totalKM        = (float) ($shuGlobalStats['totalKM'] ?? 0.0);
+        $totalKK        = (float) ($shuGlobalStats['totalKK'] ?? 0.0);
+        $totalAllShares = (float) ($shuGlobalStats['totalAllShares'] ?? 0.0);
+        $shuMemberPool  = (float) ($shuGlobalStats['shuMemberPool'] ?? 0.0);
 
         // 3. Hitung Porsi Modal Anggota Ini
         $memberShares = ($simpananPokok ?? 0) + ($simpananWajib ?? 0);
