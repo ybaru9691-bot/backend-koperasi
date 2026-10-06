@@ -153,37 +153,7 @@ class TabelarisReportService
                     return $summary;
                 }
 
-                // Chunk transaksi historis secara hemat memori & bebas N+1 query
-                Transaction::query()
-                    ->select([
-                        'id', 'type', 'amount', 'description', 'book_type',
-                        'member_id', 'transaction_date', 'created_at'
-                    ])
-                    ->with([
-                        'journalEntry:id,transaction_id',
-                        'journalEntry.details:id,journal_entry_id,account_id,debit,credit,description',
-                        'journalEntry.details.account:id,account_code,account_type'
-                    ])
-                    ->where('status', 'approved')
-                    ->where(function ($q) use ($startDate) {
-                        $q->where('transaction_date', '<', $startDate)
-                          ->orWhere(function ($sub) use ($startDate) {
-                              $sub->whereNull('transaction_date')
-                                  ->whereDate('created_at', '<', $startDate);
-                          });
-                    })
-                    ->orderBy('transaction_date', 'asc')
-                    ->orderBy('id', 'asc')
-                    ->chunk(250, function ($prevChunk) use (&$summary) {
-                        foreach ($prevChunk as $pt) {
-                            $pRow = $this->mapTransactionToTabelarisRow($pt, true);
-                            foreach (array_keys($summary) as $key) {
-                                $summary[$key] += (float) ($pRow[$key] ?? 0.0);
-                            }
-                        }
-                    });
-
-                return $summary;
+                return $this->calculateSaldoHalLaluAggregated($startDate);
             });
         }
 
@@ -1198,5 +1168,244 @@ class TabelarisReportService
         $sheet->getColumnDimension('AC')->setAutoSize(true);
 
         return $spreadsheet;
+    }
+
+    /**
+     * Hitung Saldo Hal Lalu secara agregasi SQL langsung tanpa iterasi model di memori PHP.
+     */
+    private function calculateSaldoHalLaluAggregated(string $startDate): array
+    {
+        $summary = $this->getEmptyNumericSummaryArray();
+
+        // 1. Agregasi Kas Debet dan Kas Kredit langsung dari tabel transactions
+        $kasAgg = DB::table('transactions')
+            ->where('status', 'approved')
+            ->where(function ($q) use ($startDate) {
+                $q->where('transaction_date', '<', $startDate)
+                  ->orWhere(function ($sub) use ($startDate) {
+                      $sub->whereNull('transaction_date')
+                          ->whereDate('created_at', '<', $startDate);
+                  });
+            })
+            ->selectRaw("
+                COALESCE(SUM(CASE WHEN LOWER(type) IN ('deposit', 'in', 'kas_masuk', 'km') THEN amount ELSE 0 END), 0) as kas_debet,
+                COALESCE(SUM(CASE WHEN LOWER(type) IN ('withdrawal', 'out', 'kas_keluar', 'kk') THEN amount ELSE 0 END), 0) as kas_kredit
+            ")
+            ->first();
+
+        $summary['kas_debet']  = (float) ($kasAgg->kas_debet ?? 0.0);
+        $summary['kas_kredit'] = (float) ($kasAgg->kas_kredit ?? 0.0);
+
+        // 2. Agregasi jurnal journal_details joined journal_entries & transactions
+        $journalAgg = DB::table('journal_details')
+            ->join('journal_entries', 'journal_details.journal_entry_id', '=', 'journal_entries.id')
+            ->leftJoin('chart_of_accounts', 'journal_details.account_id', '=', 'chart_of_accounts.id')
+            ->leftJoin('transactions', 'journal_entries.transaction_id', '=', 'transactions.id')
+            ->where(function ($q) use ($startDate) {
+                $q->where('journal_entries.entry_date', '<', $startDate)
+                  ->orWhere(function ($sub) use ($startDate) {
+                      $sub->whereNull('journal_entries.entry_date')
+                          ->where('transactions.transaction_date', '<', $startDate);
+                  });
+            })
+            ->where(function ($q) {
+                $q->where('transactions.status', 'approved')
+                  ->orWhereNull('transactions.id');
+            })
+            ->selectRaw("
+                COALESCE(chart_of_accounts.account_code, '') as account_code,
+                LOWER(COALESCE(journal_details.description, transactions.description, '')) as detail_desc,
+                LOWER(COALESCE(transactions.type, '')) as trx_type,
+                transactions.member_id,
+                COALESCE(SUM(journal_details.debit), 0) as total_debit,
+                COALESCE(SUM(journal_details.credit), 0) as total_credit
+            ")
+            ->groupBy('chart_of_accounts.account_code', 'detail_desc', 'trx_type', 'transactions.member_id')
+            ->get();
+
+        foreach ($journalAgg as $j) {
+            $code  = trim((string) $j->account_code);
+            $desc  = (string) $j->detail_desc;
+            $type  = (string) $j->trx_type;
+            $isKM  = in_array($type, ['deposit', 'in', 'kas_masuk', 'km']);
+            $isKK  = in_array($type, ['withdrawal', 'out', 'kas_keluar', 'kk']);
+            $isMgr = ($j->member_id === null) || str_contains($desc, 'penyesuaian manajer');
+
+            // Alokasi Pemasukan (Credit)
+            $cVal = (float) $j->total_credit;
+            if ($cVal > 0) {
+                if ($code === '4191' || str_contains($desc, 'uang pangkal') || str_contains($desc, 'pendaftaran')) {
+                    $summary['uang_pangkal'] += $cVal;
+                } elseif ($code === '4170' || str_contains($desc, 'provisi')) {
+                    $summary['provisi_pinjaman'] += $cVal;
+                } elseif ($code === '4182' || (str_contains($desc, 'denda') && !str_contains($desc, 'deviden') && !str_contains($desc, 'dividen'))) {
+                    $summary['denda_penalti'] += $cVal;
+                } elseif ($code === '4180' || str_contains($desc, 'jasa pinjaman') || str_contains($desc, 'bunga pinjaman')) {
+                    $summary['jasa_pinjaman'] += $cVal;
+                } elseif ($code === '1024' || str_contains($desc, 'angsuran')) {
+                    $summary['angsuran_pokok'] += $cVal;
+                } elseif ($code === '2021' || str_contains($desc, 'buku putih') || str_contains($desc, 'simpanan harian')) {
+                    $summary['simpanan_sh'] += $cVal;
+                } elseif ($code === '2022' || str_contains($desc, 'diakonia')) {
+                    $summary['simpanan_sd'] += $cVal;
+                } elseif (in_array($code, ['2034', '2038']) || str_contains($desc, 'dana duka') || str_contains($desc, 'dana sosial')) {
+                    $summary['dana_dana'] += $cVal;
+                } elseif (in_array($code, ['2032', '4193', '2035', '2036']) || str_contains($desc, 'asuransi')) {
+                    $summary['asuransi'] += $cVal;
+                } elseif (in_array($code, ['1010', '1011', '1012']) || (str_contains($desc, 'bank') && !str_contains($desc, 'jasa bank'))) {
+                    $summary['bank_masuk'] += $cVal;
+                } elseif (!$isMgr && ($code === '2020' || str_contains($desc, 'simpanan pokok') || str_contains($desc, 'simpanan wajib') || str_contains($desc, 'saham') || str_contains($desc, 'buku biru'))) {
+                    if (str_contains($desc, 'pokok') || str_contains($desc, 'sp')) {
+                        $summary['simpanan_sp'] += $cVal;
+                    } elseif (str_contains($desc, 'wajib') || str_contains($desc, 'sw')) {
+                        $summary['simpanan_sw'] += $cVal;
+                    } else {
+                        $summary['simpanan_ss'] += $cVal;
+                    }
+                } else {
+                    $summary['lain_lain'] += $cVal;
+                }
+            }
+
+            // Alokasi Pengeluaran (Debit)
+            $dVal = (float) $j->total_debit;
+            if ($dVal > 0) {
+                if ($code === '1024' || str_contains($desc, 'pencairan pinjaman') || str_contains($desc, 'pinjaman')) {
+                    $summary['piutang'] += $dVal;
+                } elseif (str_starts_with($code, '5') || str_contains($desc, 'biaya') || str_contains($desc, 'beban') || str_contains($desc, 'atk') || str_contains($desc, 'gaji') || str_contains($desc, 'internet') || str_contains($desc, 'listrik') || $isMgr) {
+                    $summary['biaya'] += $dVal;
+                } elseif ($code === '2021' || str_contains($desc, 'buku putih') || str_contains($desc, 'simpanan harian')) {
+                    $summary['penarikan_sh'] += $dVal;
+                } elseif ($code === '2022' || str_contains($desc, 'diakonia')) {
+                    $summary['penarikan_sd'] += $dVal;
+                } elseif (in_array($code, ['1030', '1700', '1741', '1743']) || str_contains($desc, 'inventaris')) {
+                    $summary['inventaris'] += $dVal;
+                } elseif (in_array($code, ['1010', '1011', '1012']) || str_contains($desc, 'bank')) {
+                    $summary['bank_keluar'] += $dVal;
+                } elseif ($code === '2020' || str_contains($desc, 'penarikan')) {
+                    if (str_contains($desc, 'pokok') || str_contains($desc, 'sp')) {
+                        $summary['penarikan_sp'] += $dVal;
+                    } elseif (str_contains($desc, 'wajib') || str_contains($desc, 'sw')) {
+                        $summary['penarikan_sw'] += $dVal;
+                    } else {
+                        $summary['penarikan_ss'] += $dVal;
+                    }
+                } else {
+                    $summary['biaya'] += $dVal;
+                }
+            }
+        }
+
+        // 3. Fallback transaksi approved yang belum tercatat di tabel journal_entries
+        $orphanTrxs = DB::table('transactions')
+            ->where('status', 'approved')
+            ->where(function ($q) use ($startDate) {
+                $q->where('transaction_date', '<', $startDate)
+                  ->orWhere(function ($sub) use ($startDate) {
+                      $sub->whereNull('transaction_date')
+                          ->whereDate('created_at', '<', $startDate);
+                  });
+            })
+            ->whereNotExists(function ($sub) {
+                $sub->select(DB::raw(1))
+                    ->from('journal_entries')
+                    ->whereColumn('journal_entries.transaction_id', 'transactions.id');
+            })
+            ->selectRaw("
+                LOWER(COALESCE(type, '')) as trx_type,
+                LOWER(COALESCE(category, '')) as trx_cat,
+                LOWER(COALESCE(book_type, '')) as book_type,
+                LOWER(COALESCE(description, '')) as trx_desc,
+                member_id,
+                COALESCE(SUM(amount), 0) as total_amount
+            ")
+            ->groupBy('trx_type', 'trx_cat', 'book_type', 'trx_desc', 'member_id')
+            ->get();
+
+        foreach ($orphanTrxs as $ot) {
+            $amt  = (float) $ot->total_amount;
+            $type = (string) $ot->trx_type;
+            $cat  = (string) $ot->trx_cat;
+            $bType= (string) $ot->book_type;
+            $desc = (string) $ot->trx_desc;
+            $isKM = in_array($type, ['deposit', 'in', 'kas_masuk', 'km']);
+            $isKK = in_array($type, ['withdrawal', 'out', 'kas_keluar', 'kk']);
+
+            if ($isKM) {
+                if ($cat === 'uang_pangkal' || str_contains($desc, 'uang pangkal')) {
+                    $summary['uang_pangkal'] += $amt;
+                } elseif ($bType === 'buku_putih' || $cat === 'buku_putih' || str_contains($desc, 'buku putih')) {
+                    $summary['simpanan_sh'] += $amt;
+                } elseif (str_contains($desc, 'pokok') || $cat === 'simpanan_pokok') {
+                    $summary['simpanan_sp'] += $amt;
+                } elseif (str_contains($desc, 'wajib') || $cat === 'simpanan_wajib') {
+                    $summary['simpanan_sw'] += $amt;
+                } elseif ($bType === 'buku_biru' || str_contains($desc, 'sukarela') || $cat === 'simpanan_sukarela') {
+                    $summary['simpanan_ss'] += $amt;
+                } else {
+                    $summary['lain_lain'] += $amt;
+                }
+            } elseif ($isKK) {
+                if ($cat === 'pinjaman' || str_contains($desc, 'pinjaman')) {
+                    $summary['piutang'] += $amt;
+                } elseif ($bType === 'buku_putih' || str_contains($desc, 'buku putih')) {
+                    $summary['penarikan_sh'] += $amt;
+                } elseif (str_contains($desc, 'pokok')) {
+                    $summary['penarikan_sp'] += $amt;
+                } elseif (str_contains($desc, 'wajib')) {
+                    $summary['penarikan_sw'] += $amt;
+                } elseif ($bType === 'buku_biru' || str_contains($desc, 'sukarela')) {
+                    $summary['penarikan_ss'] += $amt;
+                } else {
+                    $summary['biaya'] += $amt;
+                }
+            }
+        }
+
+        // 4. Sinkronisasi Aliases Kunci
+        $summary['tarik_sw']   = $summary['penarikan_sw'];
+        $summary['tarik_ss']   = $summary['penarikan_ss'];
+        $summary['tarik_sp']   = $summary['penarikan_sp'];
+        $summary['tarik_sh']   = $summary['penarikan_sh'];
+        $summary['tarik_sd']   = $summary['penarikan_sd'];
+        $summary['up_pangkal'] = $summary['uang_pangkal'];
+        $summary['simpan_sp']  = $summary['simpanan_sp'];
+        $summary['simpan_sw']  = $summary['simpanan_sw'];
+        $summary['simpan_ss']  = $summary['simpanan_ss'];
+        $summary['simpan_sh']  = $summary['simpanan_sh'];
+        $summary['simpan_sd']  = $summary['simpanan_sd'];
+        $summary['denda']      = $summary['denda_penalti'];
+        $summary['provisi']    = $summary['provisi_pinjaman'];
+        $summary['bri_masuk']  = $summary['bank_masuk'];
+
+        // 5. Zero Diff Guard untuk Kas Debet & Kas Kredit Saldo Hal Lalu
+        $sumPemasukan = round(
+            $summary['dana_dana'] + $summary['uang_pangkal'] + $summary['simpanan_sp'] +
+            $summary['simpanan_sw'] + $summary['simpanan_ss'] + $summary['simpanan_sh'] + $summary['simpanan_sd'] +
+            $summary['angsuran_pokok'] + $summary['jasa_pinjaman'] + $summary['denda_penalti'] +
+            $summary['provisi_pinjaman'] + $summary['asuransi'] + $summary['lain_lain'] + $summary['bank_masuk'],
+            2
+        );
+        $diffKm = round($summary['kas_debet'] - $sumPemasukan, 2);
+        if (abs($diffKm) > 0.001) {
+            $summary['lain_lain'] = round($summary['lain_lain'] + $diffKm, 2);
+        }
+
+        $sumPengeluaran = round(
+            $summary['piutang'] + $summary['penarikan_sw'] + $summary['penarikan_ss'] +
+            $summary['penarikan_sp'] + $summary['penarikan_sh'] + $summary['penarikan_sd'] +
+            $summary['inventaris'] + $summary['bank_keluar'] + $summary['biaya'],
+            2
+        );
+        $diffKk = round($summary['kas_kredit'] - $sumPengeluaran, 2);
+        if (abs($diffKk) > 0.001) {
+            $summary['biaya'] = round($summary['biaya'] + $diffKk, 2);
+        }
+
+        foreach (array_keys($summary) as $k) {
+            $summary[$k] = round((float) $summary[$k], 2);
+        }
+
+        return $summary;
     }
 }

@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\ChartOfAccount;
 use App\Models\JournalDetail;
+use App\Models\InitialAccountBalance;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class WorksheetReportService
@@ -41,80 +43,62 @@ class WorksheetReportService
             $endDate = date('Y-m-d', strtotime($endDate));
         }
 
+        // Cache hasil Worksheet untuk periode lampau (6 jam) atau periode berjalan (10 menit)
+        $isPast = $endDate && ($endDate < date('Y-m-d'));
+        $ttl = $isPast ? now()->addHours(6) : now()->addMinutes(10);
+        $cacheVersion = Cache::get('worksheet_cache_version', '1');
+        $cacheKey = "worksheet_{$startDate}_{$endDate}_{$cacheVersion}";
+
+        return Cache::remember($cacheKey, $ttl, function () use ($startDate, $endDate, $periodLabel) {
+            return $this->computeWorksheet($startDate, $endDate, $periodLabel);
+        });
+    }
+
+    /**
+     * Hitung Worksheet / Neraca Lajur
+     */
+    protected function computeWorksheet(?string $startDate = null, ?string $endDate = null, ?string $periodLabel = null): array
+    {
         // 1. Ambil seluruh daftar COA terurut berdasarkan account_code
         $coaList = ChartOfAccount::select(['id', 'account_code', 'account_name', 'account_type', 'normal_balance', 'is_active'])
             ->orderBy('account_code')
             ->get();
 
-        // 2. Integrasi Saldo Awal Cut-Off (initial_account_balances)
+        // 2. Integrasi Saldo Awal Cut-Off (initial_account_balances) secara langsung
         $cutoffDate = '2026-05-01';
         $savedBalances = collect();
-        if (\Illuminate\Support\Facades\Schema::hasTable('initial_account_balances')) {
-            $targetCutoff = \App\Models\InitialAccountBalance::when($startDate, function ($q) use ($startDate) {
-                $q->where('cutoff_date', '<=', $startDate);
-            })->max('cutoff_date');
 
-            if (!$targetCutoff) {
-                $targetCutoff = \App\Models\InitialAccountBalance::max('cutoff_date');
-            }
+        $targetCutoff = InitialAccountBalance::when($startDate, function ($q) use ($startDate) {
+            $q->where('cutoff_date', '<=', $startDate);
+        })->max('cutoff_date');
 
-            if ($targetCutoff) {
-                $cutoffDate = date('Y-m-d', strtotime($targetCutoff));
-                $savedBalances = \App\Models\InitialAccountBalance::where('cutoff_date', $cutoffDate)
-                    ->get()
-                    ->keyBy('account_code');
-            }
+        if (!$targetCutoff) {
+            $targetCutoff = InitialAccountBalance::max('cutoff_date');
         }
 
-        // Sinkronisasi jika ada akun di initial_account_balances yang belum terdaftar di tabel COA
-        if ($savedBalances->isNotEmpty()) {
-            $existingCodes = $coaList->pluck('account_code')->all();
-            $hasNew = false;
-            foreach ($savedBalances as $code => $initRec) {
-                if (!in_array($code, $existingCodes)) {
-                    $defPrefix = substr((string) $code, 0, 1);
-                    $defType = match ($defPrefix) {
-                        '1' => 'ASSET',
-                        '2' => 'LIABILITY',
-                        '3' => 'EQUITY',
-                        '4' => 'REVENUE',
-                        default => 'EXPENSE'
-                    };
-                    $defNormal = in_array($defType, ['ASSET', 'EXPENSE']) ? 'DEBIT' : 'CREDIT';
-                    $newCoa = ChartOfAccount::firstOrCreate(
-                        ['account_code' => $code],
-                        [
-                            'account_name'   => 'Akun ' . $code,
-                            'account_type'   => $defType,
-                            'normal_balance' => $defNormal,
-                            'is_active'      => true,
-                        ]
-                    );
-                    $coaList->push($newCoa);
-                    $hasNew = true;
-                }
-            }
-            if ($hasNew) {
-                $coaList = $coaList->sortBy('account_code')->values();
-            }
+        if ($targetCutoff) {
+            $cutoffDate = date('Y-m-d', strtotime($targetCutoff));
+            $savedBalances = InitialAccountBalance::where('cutoff_date', $cutoffDate)
+                ->get()
+                ->keyBy('account_code');
         }
 
         // Helper filter untuk mengecualikan transaksi migrasi saldo awal pembantu anggota (KM-IMP-...)
         // agar tidak mendobelkan saldo kas dan simpanan pada Neraca Lajur induk
         $filterNonMigration = function ($q) {
             $q->where(function ($sub) {
-                $sub->whereNull('journal_entries.voucher_number')
-                    ->orWhere(function ($vn) {
-                        $vn->where('journal_entries.voucher_number', 'not like', 'KM-IMP%')
-                           ->where('journal_entries.voucher_number', 'not like', 'KM-IMP-P%');
+                $sub->whereNull('transactions.id')
+                    ->orWhere(function ($t) {
+                        $t->whereNotIn('transactions.type', ['migration', 'import', 'migrasi'])
+                          ->where(function ($rn) {
+                              $rn->whereNull('transactions.receipt_number')
+                                 ->orWhere('transactions.receipt_number', 'not like', 'KM-IMP%');
+                          });
                     });
             })
             ->where(function ($sub) {
-                $sub->whereNull('transactions.receipt_number')
-                    ->orWhere(function ($rn) {
-                        $rn->where('transactions.receipt_number', 'not like', 'KM-IMP%')
-                           ->where('transactions.receipt_number', 'not like', 'KM-IMP-P%');
-                    });
+                $sub->whereNull('journal_entries.voucher_number')
+                    ->orWhere('journal_entries.voucher_number', 'not like', 'KM-IMP%');
             });
         };
 

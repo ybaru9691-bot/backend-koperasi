@@ -53,35 +53,25 @@ class InitialBalanceController extends Controller
                 ?? $request->input('cut_off_date')
                 ?? '2026-05-01';
 
-            // 1. Sinkronisasi master akun ke tabel chart_of_accounts jika belum ada
             $definedAccounts = $this->getInitialBalanceAccountsDefinition();
-            foreach ($definedAccounts as $code => $info) {
-                ChartOfAccount::firstOrCreate(
-                    ['account_code' => $code],
-                    [
-                        'account_name'   => $info['name'],
-                        'account_type'   => $info['type'],
-                        'normal_balance' => $info['normal'],
-                        'is_active'      => true,
-                    ]
-                );
-            }
 
-            // 2. Ambil data saldo awal tersimpan dari initial_account_balances
-            $savedBalances = collect();
-            if (\Illuminate\Support\Facades\Schema::hasTable('initial_account_balances')) {
-                $savedBalances = InitialAccountBalance::where('cutoff_date', $cutoffDate)
-                    ->get()
-                    ->keyBy('account_code');
+            // 1. Ambil data COA dalam satu batch query (bebas N+1)
+            $coaMap = ChartOfAccount::whereIn('account_code', array_keys($definedAccounts))
+                ->get()
+                ->keyBy('account_code');
 
-                if ($savedBalances->isEmpty()) {
-                    // Fallback ke cutoff_date terbaru yang tersedia jika tidak ditemukan pada tanggal spesifik
-                    $latestCutoff = InitialAccountBalance::max('cutoff_date');
-                    if ($latestCutoff) {
-                        $savedBalances = InitialAccountBalance::where('cutoff_date', $latestCutoff)
-                            ->get()
-                            ->keyBy('account_code');
-                    }
+            // 2. Ambil data saldo awal tersimpan dari initial_account_balances secara langsung
+            $savedBalances = InitialAccountBalance::where('cutoff_date', $cutoffDate)
+                ->get()
+                ->keyBy('account_code');
+
+            if ($savedBalances->isEmpty()) {
+                // Fallback ke cutoff_date terbaru yang tersedia jika tidak ditemukan pada tanggal spesifik
+                $latestCutoff = InitialAccountBalance::max('cutoff_date');
+                if ($latestCutoff) {
+                    $savedBalances = InitialAccountBalance::where('cutoff_date', $latestCutoff)
+                        ->get()
+                        ->keyBy('account_code');
                 }
             }
 
@@ -99,8 +89,8 @@ class InitialBalanceController extends Controller
                 $totalDebit += $debit;
                 $totalCredit += $credit;
 
-                // Prioritaskan nama akun dari database tabel chart_of_accounts
-                $coa = ChartOfAccount::where('account_code', $code)->first();
+                // Prioritaskan nama akun dari database tabel chart_of_accounts dari map in-memory
+                $coa = $coaMap->get($code);
                 $accountName = ($coa && !empty($coa->account_name)) ? $coa->account_name : $info['name'];
                 $normalBalance = ($coa && !empty($coa->normal_balance)) ? strtoupper((string) $coa->normal_balance) : $info['normal'];
                 $accountType = ($coa && !empty($coa->account_type)) ? strtoupper((string) $coa->account_type) : $info['type'];

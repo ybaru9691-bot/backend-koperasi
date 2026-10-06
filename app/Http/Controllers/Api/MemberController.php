@@ -48,15 +48,11 @@ class MemberController extends Controller
         $status = $request->input('status');
 
         $query = Member::select([
-            'id', 'user_id', 'member_number', 'nik', 'name', 'email', 'phone', 'gender',
-            'place_of_birth', 'date_of_birth', 'occupation', 'education', 'family_status',
-            'church_sector', 'address', 'status', 'principal_savings', 'mandatory_savings',
-            'voluntary_savings', 'daily_savings', 'registration_fee', 'social_fund', 'grief_fund',
+            'id', 'member_number', 'nik', 'name', 'email', 'phone', 'status',
+            'principal_savings', 'mandatory_savings', 'voluntary_savings', 'daily_savings',
             'buku_putih_no', 'has_buku_biru', 'has_buku_putih', 'is_white_book_active',
-            'heir_name', 'heir_relationship', 'heir_place_of_birth', 'heir_date_of_birth', 'heir_address',
-            'created_at', 'updated_at'
+            'church_sector', 'created_at'
         ])
-        ->with('user:id,name,email')
         ->when($status, function ($q) use ($status) {
             $q->where('status', $status);
         })->when($search !== '', function ($query) use ($search) {
@@ -79,37 +75,45 @@ class MemberController extends Controller
         }
 
         $isAll = $request->boolean('all') || $request->input('per_page') === 'all' || $request->input('limit') === 'all';
+        $appendsToHide = (new Member)->getAppends();
 
-        if (!$isAll && ($request->has('page') || $request->has('per_page') || $request->has('limit'))) {
-            $perPage = (int) ($request->input('per_page') ?? $request->input('limit') ?? 25);
-            $paginated = $query->paginate($perPage);
+        if ($isAll) {
+            $members = $query->limit(200)->get();
+            $members->each(fn($m) => $m->makeHidden($appendsToHide));
+
             return response()->json([
-                'success'        => true,
-                'status'         => 'success',
-                'message'        => 'Data anggota berhasil diambil',
-                'current_page'   => $paginated->currentPage(),
-                'data'           => $paginated->items(),
-                'first_page_url' => $paginated->url(1),
-                'from'           => $paginated->firstItem(),
-                'last_page'      => $paginated->lastPage(),
-                'last_page_url'  => $paginated->url($paginated->lastPage()),
-                'links'          => $paginated->linkCollection()->toArray(),
-                'next_page_url'  => $paginated->nextPageUrl(),
-                'path'           => $paginated->path(),
-                'per_page'       => $paginated->perPage(),
-                'prev_page_url'  => $paginated->previousPageUrl(),
-                'to'             => $paginated->lastItem(),
-                'total'          => $paginated->total(),
+                'success' => true,
+                'status'  => 'success',
+                'message' => 'Data anggota berhasil diambil',
+                'data'    => $members
             ], 200);
         }
 
-        $members = $query->get();
+        $perPage = (int) ($request->input('per_page') ?? $request->input('limit') ?? 25);
+        $perPage = max(1, min($perPage, 100)); // Batas maksimum 100 data per halaman
+
+        $paginated = $query->paginate($perPage);
+        $paginated->getCollection()->transform(function ($item) use ($appendsToHide) {
+            return $item->makeHidden($appendsToHide);
+        });
 
         return response()->json([
-            'success' => true,
-            'status'  => 'success',
-            'message' => 'Data anggota berhasil diambil',
-            'data'    => $members
+            'success'        => true,
+            'status'         => 'success',
+            'message'        => 'Data anggota berhasil diambil',
+            'current_page'   => $paginated->currentPage(),
+            'data'           => $paginated->items(),
+            'first_page_url' => $paginated->url(1),
+            'from'           => $paginated->firstItem(),
+            'last_page'      => $paginated->lastPage(),
+            'last_page_url'  => $paginated->url($paginated->lastPage()),
+            'links'          => $paginated->linkCollection()->toArray(),
+            'next_page_url'  => $paginated->nextPageUrl(),
+            'path'           => $paginated->path(),
+            'per_page'       => $paginated->perPage(),
+            'prev_page_url'  => $paginated->previousPageUrl(),
+            'to'             => $paginated->lastItem(),
+            'total'          => $paginated->total(),
         ], 200);
     }
 
