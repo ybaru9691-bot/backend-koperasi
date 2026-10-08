@@ -76,7 +76,7 @@ class TabelarisReportService
         $query = Transaction::query()
             ->with([
                 'member:id,name,member_number',
-                'account:id,account_name,account_code',
+                'account:id,account_name,account_number',
                 'journalEntry.details.account:id,account_code,account_type'
             ])
             ->where('status', 'approved');

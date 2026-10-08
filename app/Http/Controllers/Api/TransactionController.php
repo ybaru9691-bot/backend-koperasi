@@ -857,11 +857,12 @@ class TransactionController extends Controller
                     // 1. Cek dari Journal Detail yang berelasi jika ada
                     if ($trx->journalEntry && $trx->journalEntry->details->count() > 0) {
                         $counterDetail = $trx->journalEntry->details->first(function ($det) {
-                            return $det->account && !in_array($det->account->account_code, ['1000', '1010']);
+                            $code = $det->account ? ($det->account->account_number ?? $det->account->account_code ?? '') : '';
+                            return !empty($code) && !in_array($code, ['1000', '1010']);
                         });
 
                         if ($counterDetail && $counterDetail->account) {
-                            $accountCode = $counterDetail->account->account_code;
+                            $accountCode = $counterDetail->account->account_number ?? $counterDetail->account->account_code ?? '';
                             $accountName = $counterDetail->account->account_name;
                         }
                     }
@@ -974,7 +975,7 @@ class TransactionController extends Controller
                     'member:id,name,member_number',
                     'account:id,account_name,account_number',
                     'operator:id,name',
-                    'journalEntry.details.account:id,account_code,account_name',
+                    'journalEntry.details.account:id,account_number,account_name',
                 ]);
 
             // Filters
@@ -1078,10 +1079,11 @@ class TransactionController extends Controller
 
                 if ($trx->journalEntry && $trx->journalEntry->details->count() > 0) {
                     $counterDetail = $trx->journalEntry->details->first(function ($det) {
-                        return $det->account && !in_array($det->account->account_code, ['1000', '1010']);
+                        $code = $det->account ? ($det->account->account_number ?? $det->account->account_code ?? '') : '';
+                        return !empty($code) && !in_array($code, ['1000', '1010']);
                     });
                     if ($counterDetail && $counterDetail->account) {
-                        $accountCode = $counterDetail->account->account_code;
+                        $accountCode = $counterDetail->account->account_number ?? $counterDetail->account->account_code ?? '';
                         $accountName = $counterDetail->account->account_name;
                     }
                 } else {
@@ -1729,7 +1731,7 @@ class TransactionController extends Controller
         if ($member) {
             $columnToUpdate = 'voluntary_savings';
             $descLower = strtolower($transaction->description ?? '');
-            $accCode = $transaction->account ? $transaction->account->account_code : '';
+            $accCode = $transaction->account ? ($transaction->account->account_number ?? $transaction->account->account_code ?? '') : '';
 
             $isOperationalRevenue = in_array($accCode, ['4170', '4181', '4182', '4183', '4184', '4191', '4192', '4193', '4194'])
                 || (str_starts_with($accCode, '4') && $accCode !== '4180')
@@ -1759,7 +1761,7 @@ class TransactionController extends Controller
 
         // 2. Revert status Loan Installment jika transaksi pembayaran cicilan pinjaman
         $descLower = strtolower($transaction->description ?? '');
-        $accCode = $transaction->account ? $transaction->account->account_code : '';
+        $accCode = $transaction->account ? ($transaction->account->account_number ?? $transaction->account->account_code ?? '') : '';
         $isLoanPayment = ($accCode === '1024')
             || str_contains($descLower, 'angsuran')
             || str_contains($descLower, 'cicilan')
