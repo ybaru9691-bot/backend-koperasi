@@ -48,15 +48,15 @@ return [
     'unix_socket' => env('DB_SOCKET', ''),
     'charset' => 'utf8mb4',
     'collation' => 'utf8mb4_unicode_ci',
-    'prefix' => '',
-    'prefix_indexes' => true,
-    'strict' => true,
-    'engine' => null,
-    'options' => extension_loaded('pdo_mysql') ? [
-            \PDO::MYSQL_ATTR_SSL_CA => false,
-            \PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false,
-        ] : [],
-],
+        'prefix' => '',
+        'prefix_indexes' => true,
+        'strict' => true,
+        'engine' => null,
+        'options' => extension_loaded('pdo_mysql') ? array_filter([
+            (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
+            PDO::ATTR_EMULATE_PREPARES => true,
+        ]) : [],
+    ],
         
 
         'mariadb' => [
