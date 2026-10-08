@@ -71,20 +71,23 @@ class DividendService
      */
     public function getHistoricalCoopSharesAtDate(string $cutoffDate, int $month): float
     {
-        $total = (float) (Member::where('status', 'active')
-            ->whereNotNull('member_number')
-            ->where('member_number', '!=', '-')
-            ->where('member_number', '!=', '')
-            ->where(function ($q) {
-                $q->where('principal_savings', '>', 0)
-                  ->orWhere('mandatory_savings', '>', 0)
-                  ->orWhere('voluntary_savings', '>', 0)
-                  ->orWhere('has_buku_biru', true);
-            })
-            ->selectRaw('SUM(COALESCE(principal_savings, 0) + COALESCE(mandatory_savings, 0) + COALESCE(voluntary_savings, 0)) as total')
-            ->value('total') ?? 0.0);
+        $cacheKey = "coop_historical_shares_{$cutoffDate}_{$month}";
+        return Cache::remember($cacheKey, 300, function () {
+            $total = (float) (Member::where('status', 'active')
+                ->whereNotNull('member_number')
+                ->where('member_number', '!=', '-')
+                ->where('member_number', '!=', '')
+                ->where(function ($q) {
+                    $q->where('principal_savings', '>', 0)
+                      ->orWhere('mandatory_savings', '>', 0)
+                      ->orWhere('voluntary_savings', '>', 0)
+                      ->orWhere('has_buku_biru', true);
+                })
+                ->selectRaw('SUM(COALESCE(principal_savings, 0) + COALESCE(mandatory_savings, 0) + COALESCE(voluntary_savings, 0)) as total')
+                ->value('total') ?? 0.0);
 
-        return round($total, 2);
+            return round($total, 2);
+        });
     }
 
     /**
@@ -152,44 +155,52 @@ class DividendService
         }
 
         // Filter Murni Kas Masuk Operasional Koperasi (bukan setoran simpanan anggota)
-        $incomeQuery = Transaction::query()
-            ->whereDate('transaction_date', '>=', $startDate)
-            ->whereDate('transaction_date', '<=', $endDate)
-            ->where('status', 'approved')
-            ->selectRaw("
-                SUM(CASE 
-                    WHEN (type IN ('in', 'kas_masuk', 'KM') OR category IN ('pendapatan_lain', 'jasa_pinjaman', 'provisi', 'provisi_pinjaman', 'denda', 'administrasi', 'uang_pangkal', 'pend_fotocopy', 'pend_sembako', 'jasa_bank'))
-                         AND (category IS NULL OR category NOT IN ('simpanan_pokok', 'simpanan_wajib', 'simpanan_sukarela', 'simpanan_harian', 'bunga_simpanan', 'bunga_saham', 'transfer'))
-                         AND (type != 'deposit')
-                         AND (description IS NULL OR (
-                             description NOT LIKE '%saldo awal%'
-                             AND description NOT LIKE '%simpanan%'
-                             AND description NOT LIKE '%harian%'
-                             AND description NOT LIKE '%tabungan%'
-                             AND description NOT LIKE '%wajib%'
-                             AND description NOT LIKE '%pokok%'
-                             AND description NOT LIKE '%sukarela%'
-                         ))
-                    THEN amount ELSE 0 END
-                ) as total_km,
-                SUM(CASE 
-                    WHEN (type IN ('out', 'kas_keluar', 'KK') OR category IN ('beban_operasional', 'biaya', 'atk', 'komunikasi', 'gaji', 'listrik', 'wifi', 'beban'))
-                         AND (category IS NULL OR category NOT IN ('simpanan_pokok', 'simpanan_wajib', 'simpanan_sukarela', 'simpanan_harian', 'tarik_buku_putih', 'tarik_buku_biru', 'tarik_simpanan'))
-                         AND (type != 'withdrawal')
-                         AND (description IS NULL OR (
-                             description NOT LIKE '%penarikan%'
-                             AND description NOT LIKE '%deviden%'
-                             AND description NOT LIKE '%simpanan%'
-                             AND description NOT LIKE '%harian%'
-                             AND description NOT LIKE '%tarik%'
-                         ))
-                    THEN amount ELSE 0 END
-                ) as total_kk
-            ")
-            ->first();
+        $cacheKey = "coop_profit_raw_{$month}_{$year}";
+        $incomeData = Cache::remember($cacheKey, 300, function () use ($startDate, $endDate) {
+            $row = Transaction::query()
+                ->whereDate('transaction_date', '>=', $startDate)
+                ->whereDate('transaction_date', '<=', $endDate)
+                ->where('status', 'approved')
+                ->selectRaw("
+                    SUM(CASE 
+                        WHEN (type IN ('in', 'kas_masuk', 'KM') OR category IN ('pendapatan_lain', 'jasa_pinjaman', 'provisi', 'provisi_pinjaman', 'denda', 'administrasi', 'uang_pangkal', 'pend_fotocopy', 'pend_sembako', 'jasa_bank'))
+                             AND (category IS NULL OR category NOT IN ('simpanan_pokok', 'simpanan_wajib', 'simpanan_sukarela', 'simpanan_harian', 'bunga_simpanan', 'bunga_saham', 'transfer'))
+                             AND (type != 'deposit')
+                             AND (description IS NULL OR (
+                                 description NOT LIKE '%saldo awal%'
+                                 AND description NOT LIKE '%simpanan%'
+                                 AND description NOT LIKE '%harian%'
+                                 AND description NOT LIKE '%tabungan%'
+                                 AND description NOT LIKE '%wajib%'
+                                 AND description NOT LIKE '%pokok%'
+                                 AND description NOT LIKE '%sukarela%'
+                             ))
+                        THEN amount ELSE 0 END
+                    ) as total_km,
+                    SUM(CASE 
+                        WHEN (type IN ('out', 'kas_keluar', 'KK') OR category IN ('beban_operasional', 'biaya', 'atk', 'komunikasi', 'gaji', 'listrik', 'wifi', 'beban'))
+                             AND (category IS NULL OR category NOT IN ('simpanan_pokok', 'simpanan_wajib', 'simpanan_sukarela', 'simpanan_harian', 'tarik_buku_putih', 'tarik_buku_biru', 'tarik_simpanan'))
+                             AND (type != 'withdrawal')
+                             AND (description IS NULL OR (
+                                 description NOT LIKE '%penarikan%'
+                                 AND description NOT LIKE '%deviden%'
+                                 AND description NOT LIKE '%simpanan%'
+                                 AND description NOT LIKE '%harian%'
+                                 AND description NOT LIKE '%tarik%'
+                             ))
+                        THEN amount ELSE 0 END
+                    ) as total_kk
+                ")
+                ->first();
 
-        $totalKm = (float) ($incomeQuery->total_km ?? 0.0);
-        $totalKk = (float) ($incomeQuery->total_kk ?? 0.0);
+            return [
+                'total_km' => (float) ($row->total_km ?? 0.0),
+                'total_kk' => (float) ($row->total_kk ?? 0.0),
+            ];
+        });
+
+        $totalKm = $incomeData['total_km'];
+        $totalKk = $incomeData['total_kk'];
         $netShu  = max(0.0, round($totalKm - $totalKk, 2));
 
         return [
@@ -266,9 +277,111 @@ class DividendService
     }
 
     /**
+     * Hitung ringkasan statistik saham koperasi untuk alokasi deviden (di-cache 5 menit)
+     */
+    public function getCooperativeShareStats(array $dates, float $dividendPool): array
+    {
+        $cacheKey = "coop_share_stats_{$dates['target_ym']}_" . round($dividendPool, 2);
+        return Cache::remember($cacheKey, 300, function () use ($dates, $dividendPool) {
+            $members = Member::query()
+                ->whereNotNull('member_number')
+                ->where('member_number', '!=', '-')
+                ->where('member_number', '!=', '')
+                ->where(function ($q) {
+                    $q->where('principal_savings', '>', 0)
+                      ->orWhere('mandatory_savings', '>', 0)
+                      ->orWhere('voluntary_savings', '>', 0)
+                      ->orWhere('has_buku_biru', true);
+                })
+                ->select([
+                    'id', 'member_number', 'principal_savings', 'mandatory_savings',
+                    'voluntary_savings', 'has_buku_biru', 'status', 'created_at'
+                ])
+                ->get();
+
+            $recentDepositMemberIds = DB::table('transactions')
+                ->where('book_type', 'BUKU_BIRU')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->where('status', 'approved')
+                ->whereDate('transaction_date', '>=', $dates['six_months_start'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->whereNotNull('member_id')
+                ->pluck('member_id')
+                ->unique()
+                ->flip()
+                ->all();
+
+            $cutoffCarbon = Carbon::parse($dates['cutoff_date']);
+            $sixMonthsPriorDate = $cutoffCarbon->copy()->subMonths(6);
+
+            $totalBukuBiruMembers = 0;
+            $eligibleCount = 0;
+            $ineligibleCount = 0;
+            $swArrearsCount = 0;
+            $totalAllShares = 0.0;
+            $totalEligibleShares = 0.0;
+
+            foreach ($members as $member) {
+                $sp = (float) ($member->principal_savings ?? $member->simpanan_pokok ?? 0.0);
+                if ($sp <= 0 && $member->has_buku_biru) {
+                    $sp = 200000.0;
+                }
+                $sw = (float) ($member->mandatory_savings ?? $member->simpanan_wajib ?? 0.0);
+                $ss = (float) ($member->voluntary_savings ?? $member->simpanan_sukarela ?? 0.0);
+                $totalSaham = round($sp + $sw + $ss, 2);
+
+                $memberNo = trim((string) ($member->member_number ?? ''));
+                if (empty($memberNo) || $memberNo === '-' || str_starts_with($memberNo, 'BP-')) {
+                    continue;
+                }
+                if (!$member->has_buku_biru && $totalSaham <= 0) {
+                    continue;
+                }
+
+                $totalBukuBiruMembers++;
+                $totalAllShares += $totalSaham;
+
+                $memberCreatedAt = $member->created_at ? Carbon::parse($member->created_at) : null;
+                $isMemberOlderThan6Mo = $memberCreatedAt ? $memberCreatedAt->lte($sixMonthsPriorDate) : true;
+                $hasRecentDeposit = isset($recentDepositMemberIds[$member->id]);
+                
+                $isSwArrears = ($isMemberOlderThan6Mo && !$hasRecentDeposit && $sw <= 20000.0);
+                $isEligible = ($totalSaham > 0 && !$isSwArrears && $member->status !== 'inactive' && $member->status !== 'resigned');
+
+                if ($isSwArrears) {
+                    $swArrearsCount++;
+                }
+
+                if ($isEligible) {
+                    $eligibleCount++;
+                    $totalEligibleShares += $totalSaham;
+                } else {
+                    $ineligibleCount++;
+                }
+            }
+
+            $totalLembarKoperasi = round($totalEligibleShares / 1000.0, 2);
+            $hargaDevidenPerLembar = ($totalLembarKoperasi > 0 && $dividendPool > 0)
+                ? ($dividendPool / $totalLembarKoperasi)
+                : 0.0;
+
+            return [
+                'total_buku_biru_members'  => $totalBukuBiruMembers,
+                'eligible_count'           => $eligibleCount,
+                'ineligible_count'         => $ineligibleCount,
+                'sw_arrears_count'         => $swArrearsCount,
+                'total_all_shares'         => round($totalAllShares, 2),
+                'total_eligible_shares'    => round($totalEligibleShares, 2),
+                'total_lembar_koperasi'    => $totalLembarKoperasi,
+                'harga_deviden_per_lembar' => round($hargaDevidenPerLembar, 6),
+            ];
+        });
+    }
+
+    /**
      * Kalkulasi preview pembagian deviden Buku Biru (Siklus Cut-off 21 s/d 20)
      */
-    public function preview(int $month, int $year, float $percentage = self::DEFAULT_PERCENTAGE): array
+    public function preview(int $month, int $year, float $percentage = self::DEFAULT_PERCENTAGE, ?int $memberId = null): array
     {
         $percentage = max(0.0, min(100.0, $percentage));
         $dates = $this->resolveDates($month, $year);
@@ -277,85 +390,152 @@ class DividendService
         $dividendPool = round($shuBersih * ($percentage / 100.0), 2);
         $isDistributed = $this->isAlreadyDistributed($dates['target_ym'], $month, $year);
 
-        // Ambil data anggota pemilik Buku Biru yang valid
-        $members = Member::query()
-            ->whereNotNull('member_number')
-            ->where('member_number', '!=', '-')
-            ->where('member_number', '!=', '')
-            ->where(function ($q) {
-                $q->where('principal_savings', '>', 0)
-                  ->orWhere('mandatory_savings', '>', 0)
-                  ->orWhere('voluntary_savings', '>', 0)
-                  ->orWhere('has_buku_biru', true);
-            })
-            ->orderBy('member_number', 'asc')
-            ->get();
+        if ($memberId !== null) {
+            $stats = $this->getCooperativeShareStats($dates, $dividendPool);
+            $totalBukuBiruMembers   = $stats['total_buku_biru_members'];
+            $eligibleCount          = $stats['eligible_count'];
+            $ineligibleCount        = $stats['ineligible_count'];
+            $swArrearsCount         = $stats['sw_arrears_count'];
+            $totalAllShares         = $stats['total_all_shares'];
+            $totalEligibleShares    = $stats['total_eligible_shares'];
+            $totalLembarKoperasi    = $stats['total_lembar_koperasi'];
+            $hargaDevidenPerLembar  = $stats['harga_deviden_per_lembar'];
 
-        // Cari transaksi simpanan anggota dalam 6 bulan terakhir untuk pengecekan tunggakan SW
-        $recentDepositMemberIds = DB::table('transactions')
-            ->where('book_type', 'BUKU_BIRU')
-            ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
-            ->where('status', 'approved')
-            ->whereDate('transaction_date', '>=', $dates['six_months_start'])
-            ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
-            ->whereNotNull('member_id')
-            ->pluck('member_id')
-            ->unique()
-            ->flip()
-            ->all();
+            $members = Member::query()->where('id', $memberId)->get();
 
-        // Ambil transaksi setoran anggota pada siklus berjalan untuk mengecualikan setoran baru dari dasar jasa
-        $cycleDepositsByMember = DB::table('transactions')
-            ->where('book_type', 'BUKU_BIRU')
-            ->where('status', 'approved')
-            ->whereNotNull('member_id')
-            ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
-            ->whereDate('transaction_date', '>=', $dates['start_date'])
-            ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
-            ->where(function ($q) {
-                $q->whereNull('category')
-                  ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
-            })
-            ->where(function ($q) {
-                $q->whereNull('description')
-                  ->orWhere(function ($sub) {
-                      $sub->where('description', 'not like', '%saldo awal%')
-                          ->where('description', 'not like', '%deviden%')
-                          ->where('description', 'not like', '%bunga saham%');
-                  });
-            })
-            ->selectRaw('member_id, SUM(amount) as total_deposits')
-            ->groupBy('member_id')
-            ->pluck('total_deposits', 'member_id')
-            ->all();
+            $recentDepositMemberIds = DB::table('transactions')
+                ->where('member_id', $memberId)
+                ->where('book_type', 'BUKU_BIRU')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->where('status', 'approved')
+                ->whereDate('transaction_date', '>=', $dates['six_months_start'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->pluck('member_id')
+                ->unique()
+                ->flip()
+                ->all();
 
-        // Ambil ID anggota yang membayar Simpanan Wajib (SW) pada siklus berjalan
-        $cyclePaidSwMemberIds = DB::table('transactions')
-            ->where('book_type', 'BUKU_BIRU')
-            ->where('status', 'approved')
-            ->whereNotNull('member_id')
-            ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
-            ->whereDate('transaction_date', '>=', $dates['start_date'])
-            ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
-            ->where(function ($q) {
-                $q->where('category', 'simpanan_wajib')
-                  ->orWhere('description', 'like', '%wajib%');
-            })
-            ->pluck('member_id')
-            ->unique()
-            ->flip()
-            ->all();
+            $cycleDepositsByMember = DB::table('transactions')
+                ->where('member_id', $memberId)
+                ->where('book_type', 'BUKU_BIRU')
+                ->where('status', 'approved')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->whereDate('transaction_date', '>=', $dates['start_date'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->where(function ($q) {
+                    $q->whereNull('category')
+                      ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
+                })
+                ->where(function ($q) {
+                    $q->whereNull('description')
+                      ->orWhere(function ($sub) {
+                          $sub->where('description', 'not like', '%saldo awal%')
+                              ->where('description', 'not like', '%deviden%')
+                              ->where('description', 'not like', '%bunga saham%');
+                      });
+                })
+                ->selectRaw('member_id, SUM(amount) as total_deposits')
+                ->groupBy('member_id')
+                ->pluck('total_deposits', 'member_id')
+                ->all();
+
+            $cyclePaidSwMemberIds = DB::table('transactions')
+                ->where('member_id', $memberId)
+                ->where('book_type', 'BUKU_BIRU')
+                ->where('status', 'approved')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->whereDate('transaction_date', '>=', $dates['start_date'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->where(function ($q) {
+                    $q->where('category', 'simpanan_wajib')
+                      ->orWhere('description', 'like', '%wajib%');
+                })
+                ->pluck('member_id')
+                ->unique()
+                ->flip()
+                ->all();
+        } else {
+            // Ambil data anggota pemilik Buku Biru yang valid
+            $members = Member::query()
+                ->whereNotNull('member_number')
+                ->where('member_number', '!=', '-')
+                ->where('member_number', '!=', '')
+                ->where(function ($q) {
+                    $q->where('principal_savings', '>', 0)
+                      ->orWhere('mandatory_savings', '>', 0)
+                      ->orWhere('voluntary_savings', '>', 0)
+                      ->orWhere('has_buku_biru', true);
+                })
+                ->orderBy('member_number', 'asc')
+                ->get();
+
+            // Cari transaksi simpanan anggota dalam 6 bulan terakhir untuk pengecekan tunggakan SW
+            $recentDepositMemberIds = DB::table('transactions')
+                ->where('book_type', 'BUKU_BIRU')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->where('status', 'approved')
+                ->whereDate('transaction_date', '>=', $dates['six_months_start'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->whereNotNull('member_id')
+                ->pluck('member_id')
+                ->unique()
+                ->flip()
+                ->all();
+
+            // Ambil transaksi setoran anggota pada siklus berjalan untuk mengecualikan setoran baru dari dasar jasa
+            $cycleDepositsByMember = DB::table('transactions')
+                ->where('book_type', 'BUKU_BIRU')
+                ->where('status', 'approved')
+                ->whereNotNull('member_id')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->whereDate('transaction_date', '>=', $dates['start_date'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->where(function ($q) {
+                    $q->whereNull('category')
+                      ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
+                })
+                ->where(function ($q) {
+                    $q->whereNull('description')
+                      ->orWhere(function ($sub) {
+                          $sub->where('description', 'not like', '%saldo awal%')
+                              ->where('description', 'not like', '%deviden%')
+                              ->where('description', 'not like', '%bunga saham%');
+                      });
+                })
+                ->selectRaw('member_id, SUM(amount) as total_deposits')
+                ->groupBy('member_id')
+                ->pluck('total_deposits', 'member_id')
+                ->all();
+
+            // Ambil ID anggota yang membayar Simpanan Wajib (SW) pada siklus berjalan
+            $cyclePaidSwMemberIds = DB::table('transactions')
+                ->where('book_type', 'BUKU_BIRU')
+                ->where('status', 'approved')
+                ->whereNotNull('member_id')
+                ->whereIn('type', ['deposit', 'in', 'kas_masuk', 'KM'])
+                ->whereDate('transaction_date', '>=', $dates['start_date'])
+                ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
+                ->where(function ($q) {
+                    $q->where('category', 'simpanan_wajib')
+                      ->orWhere('description', 'like', '%wajib%');
+                })
+                ->pluck('member_id')
+                ->unique()
+                ->flip()
+                ->all();
+
+            $totalBukuBiruMembers = 0;
+            $eligibleCount = 0;
+            $ineligibleCount = 0;
+            $swArrearsCount = 0;
+            $totalAllShares = 0.0;
+            $totalEligibleShares = 0.0;
+        }
 
         $cutoffCarbon = Carbon::parse($dates['cutoff_date']);
         $sixMonthsPriorDate = $cutoffCarbon->copy()->subMonths(6);
 
         $memberCalculations = [];
-        $totalBukuBiruMembers = 0;
-        $eligibleCount = 0;
-        $ineligibleCount = 0;
-        $swArrearsCount = 0;
-        $totalAllShares = 0.0;
-        $totalEligibleShares = 0.0;
 
         foreach ($members as $member) {
             $sp = (float) ($member->principal_savings ?? $member->simpanan_pokok ?? 0.0);
@@ -375,8 +555,10 @@ class DividendService
                 continue;
             }
 
-            $totalBukuBiruMembers++;
-            $totalAllShares += $totalSaham;
+            if ($memberId === null) {
+                $totalBukuBiruMembers++;
+                $totalAllShares += $totalSaham;
+            }
 
             // Evaluasi status keaktifan dan tunggakan Simpanan Wajib (SW) >= 6 bulan
             $memberCreatedAt = $member->created_at ? Carbon::parse($member->created_at) : null;
@@ -388,7 +570,7 @@ class DividendService
             $isEligible = ($totalSaham > 0 && !$isSwArrears && $member->status !== 'inactive' && $member->status !== 'resigned');
 
             if ($isSwArrears) {
-                $swArrearsCount++;
+                if ($memberId === null) $swArrearsCount++;
                 $ineligibilityReason = 'Gugur Hak SHU - Tunggakan SW ≥ 6 Bulan';
             } elseif ($totalSaham <= 0) {
                 $ineligibilityReason = 'Saldo Saham Rp 0';
@@ -399,10 +581,12 @@ class DividendService
             }
 
             if ($isEligible) {
-                $eligibleCount++;
-                $totalEligibleShares += $totalSaham;
+                if ($memberId === null) {
+                    $eligibleCount++;
+                    $totalEligibleShares += $totalSaham;
+                }
             } else {
-                $ineligibleCount++;
+                if ($memberId === null) $ineligibleCount++;
             }
 
             $lembarSaham = round($totalSaham / 1000.0, 2);
@@ -435,11 +619,13 @@ class DividendService
             ];
         }
 
-        // Hitung nominal deviden per lembar saham koperasi
-        $totalLembarKoperasi = round($totalEligibleShares / 1000.0, 2);
-        $hargaDevidenPerLembar = ($totalLembarKoperasi > 0 && $dividendPool > 0)
-            ? ($dividendPool / $totalLembarKoperasi)
-            : 0.0;
+        if ($memberId === null) {
+            // Hitung nominal deviden per lembar saham koperasi
+            $totalLembarKoperasi = round($totalEligibleShares / 1000.0, 2);
+            $hargaDevidenPerLembar = ($totalLembarKoperasi > 0 && $dividendPool > 0)
+                ? ($dividendPool / $totalLembarKoperasi)
+                : 0.0;
+        }
 
         // Hitung nominal deviden untuk masing-masing anggota berhak
         $totalCalculatedDividend = 0.0;
@@ -793,20 +979,6 @@ class DividendService
 
         $fiscalPeriodLabel = "Juni {$startYear} - Mei {$endYear}";
 
-        // Total Saham Koperasi: SUM saldo simpanan seluruh anggota Buku Biru aktif (posisi saat ini)
-        // Nilai historis per cut-off dihitung dinamis lewat getHistoricalCoopSharesAtDate() pada setiap iterasi bulan
-        $totalSahamKoperasiAll = (float) (Member::whereNotNull('member_number')
-            ->where('member_number', '!=', '-')
-            ->where('member_number', '!=', '')
-            ->where(function ($q) {
-                $q->where('principal_savings', '>', 0)
-                  ->orWhere('mandatory_savings', '>', 0)
-                  ->orWhere('voluntary_savings', '>', 0)
-                  ->orWhere('has_buku_biru', true);
-            })
-            ->selectRaw('SUM(COALESCE(principal_savings, 0) + COALESCE(mandatory_savings, 0) + COALESCE(voluntary_savings, 0)) as total')
-            ->value('total') ?? 0.0);
-
         // Nilai SP Baku / Master Anggota (Konstan sejak pendaftaran)
         $initialSp = (float) ($member->principal_savings ?? $member->simpanan_pokok ?? 200000.0);
         if ($initialSp <= 0) {
@@ -871,6 +1043,19 @@ class DividendService
                           ->where('description', 'not like', '%jurnal memorial%');
                   });
             })
+            ->select([
+                'id',
+                'member_id',
+                'transaction_number',
+                'receipt_number',
+                'type',
+                'amount',
+                'transaction_date',
+                'category',
+                'payment_method',
+                'description',
+                'status',
+            ])
             ->orderBy('transaction_date', 'asc')
             ->orderBy('id', 'asc')
             ->get();
@@ -976,10 +1161,12 @@ class DividendService
             if ($isFutureMonth) {
                 $shuBulan = 0.0;
             } else {
-                $profit   = $this->calculateNetProfit($m, $y);
-                $shuBulan = ($saved && $saved->net_income !== null)
-                    ? (float) $saved->net_income
-                    : (float) $profit['shu_bersih'];
+                if ($saved && $saved->net_income !== null) {
+                    $shuBulan = (float) $saved->net_income;
+                } else {
+                    $profit   = $this->calculateNetProfit($m, $y);
+                    $shuBulan = (float) $profit['shu_bersih'];
+                }
             }
 
             $divPercent = $saved ? (float) $saved->dividend_allocation_percent : self::DEFAULT_PERCENTAGE;

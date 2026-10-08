@@ -895,5 +895,51 @@ class DividendDistributionTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    public function test_preview_with_member_id_returns_only_selected_member_and_caches()
+    {
+        Sanctum::actingAs($this->manager);
+
+        // Buat 2 member Buku Biru
+        $member1 = Member::create([
+            'name'              => 'Anggota Biru Alpha',
+            'nik'               => '1234567890123991',
+            'member_number'     => '0991',
+            'has_buku_biru'     => true,
+            'principal_savings' => 1000000.00,
+            'mandatory_savings' => 2000000.00,
+            'voluntary_savings' => 3000000.00,
+            'status'            => 'active',
+            'created_at'        => Carbon::parse('2025-01-01'),
+        ]);
+
+        $member2 = Member::create([
+            'name'              => 'Anggota Biru Beta',
+            'nik'               => '1234567890123992',
+            'member_number'     => '0992',
+            'has_buku_biru'     => true,
+            'principal_savings' => 500000.00,
+            'mandatory_savings' => 1500000.00,
+            'voluntary_savings' => 0.00,
+            'status'            => 'active',
+            'created_at'        => Carbon::parse('2025-01-01'),
+        ]);
+
+        // Request preview HANYA untuk member 1
+        $response = $this->getJson("/api/manager/dividends/preview?year=2026&month=9&percentage=25&member_id={$member1->id}");
+        $response->assertStatus(200);
+
+        $data = $response->json('data');
+        // Pastikan hanya 1 member yang dikembalikan pada array members dan details
+        $this->assertCount(1, $data['members']);
+        $this->assertCount(1, $data['details']);
+        $this->assertEquals($member1->id, $data['members'][0]['member_id']);
+        $this->assertEquals('0991', $data['members'][0]['member_number']);
+
+        // Pastikan cache tersimpan dan request kedua berjalan sukses
+        $responseCached = $this->getJson("/api/manager/dividends/preview?year=2026&month=9&percentage=25&member_id={$member1->id}");
+        $responseCached->assertStatus(200);
+        $this->assertEquals($data, $responseCached->json('data'));
+    }
 }
 

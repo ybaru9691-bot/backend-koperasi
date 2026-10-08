@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\DividendService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
@@ -219,7 +220,19 @@ class ShuController extends Controller
                 $calendarYear = (int) $request->input('calendar_year');
             }
             $percentage = (float) ($request->input('percentage') ?? DividendService::DEFAULT_PERCENTAGE);
-            $data = $this->dividendService->preview($month, $calendarYear, $percentage);
+            $memberId = $request->input('member_id') ?? $request->input('id');
+            if (!$memberId && $request->filled('member_number')) {
+                $memberId = \App\Models\Member::where('member_number', $request->input('member_number'))->value('id');
+            }
+            $memberId = $memberId ? (int) $memberId : null;
+
+            $cacheKey = $memberId 
+                ? "dividend_preview_member_{$memberId}_{$month}_{$calendarYear}_" . round($percentage, 2)
+                : "dividend_preview_global_{$month}_{$calendarYear}_" . round($percentage, 2);
+
+            $data = Cache::remember($cacheKey, 300, function () use ($month, $calendarYear, $percentage, $memberId) {
+                return $this->dividendService->preview($month, $calendarYear, $percentage, $memberId);
+            });
 
             return response()->json([
                 'success' => true,

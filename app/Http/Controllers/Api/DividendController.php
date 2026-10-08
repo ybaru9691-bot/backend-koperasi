@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\DividendService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -62,7 +63,19 @@ class DividendController extends Controller
                 ], 422);
             }
 
-            $data = $this->dividendService->preview($month, $year, $percentage);
+            $memberId = $request->input('member_id') ?? $request->input('id');
+            if (!$memberId && $request->filled('member_number')) {
+                $memberId = \App\Models\Member::where('member_number', $request->input('member_number'))->value('id');
+            }
+            $memberId = $memberId ? (int) $memberId : null;
+
+            $cacheKey = $memberId 
+                ? "dividend_preview_member_{$memberId}_{$month}_{$year}_" . round($percentage, 2)
+                : "dividend_preview_global_{$month}_{$year}_" . round($percentage, 2);
+
+            $data = Cache::remember($cacheKey, 300, function () use ($month, $year, $percentage, $memberId) {
+                return $this->dividendService->preview($month, $year, $percentage, $memberId);
+            });
 
             return response()->json([
                 'success' => true,
@@ -335,7 +348,12 @@ class DividendController extends Controller
             $month      = $request->has('month') ? (int) $request->input('month') : null;
             $year       = $request->has('year') ? (int) $request->input('year') : null;
 
-            $data = $this->dividendService->getMemberDividendStatement((int) $id, $fiscalYear, $month, $year);
+            $memberId   = (int) $id;
+            $cacheKey   = "dividend_statement_{$memberId}_fy" . ($fiscalYear ?? 'null') . "_m" . ($month ?? 'null') . "_y" . ($year ?? 'null');
+
+            $data = Cache::remember($cacheKey, 300, function () use ($memberId, $fiscalYear, $month, $year) {
+                return $this->dividendService->getMemberDividendStatement($memberId, $fiscalYear, $month, $year);
+            });
 
             return response()->json([
                 'success' => true,
