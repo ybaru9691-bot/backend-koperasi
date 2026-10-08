@@ -857,12 +857,12 @@ class TransactionController extends Controller
                     // 1. Cek dari Journal Detail yang berelasi jika ada
                     if ($trx->journalEntry && $trx->journalEntry->details->count() > 0) {
                         $counterDetail = $trx->journalEntry->details->first(function ($det) {
-                            $code = $det->account ? ($det->account->account_number ?? $det->account->account_code ?? '') : '';
+                            $code = $det->account ? ($det->account->account_code ?? $det->account->account_number ?? '') : '';
                             return !empty($code) && !in_array($code, ['1000', '1010']);
                         });
 
                         if ($counterDetail && $counterDetail->account) {
-                            $accountCode = $counterDetail->account->account_number ?? $counterDetail->account->account_code ?? '';
+                            $accountCode = $counterDetail->account->account_code ?? $counterDetail->account->account_number ?? '';
                             $accountName = $counterDetail->account->account_name;
                         }
                     }
@@ -1079,11 +1079,11 @@ class TransactionController extends Controller
 
                 if ($trx->journalEntry && $trx->journalEntry->details->count() > 0) {
                     $counterDetail = $trx->journalEntry->details->first(function ($det) {
-                        $code = $det->account ? ($det->account->account_number ?? $det->account->account_code ?? '') : '';
+                        $code = $det->account ? ($det->account->account_code ?? $det->account->account_number ?? '') : '';
                         return !empty($code) && !in_array($code, ['1000', '1010']);
                     });
                     if ($counterDetail && $counterDetail->account) {
-                        $accountCode = $counterDetail->account->account_number ?? $counterDetail->account->account_code ?? '';
+                        $accountCode = $counterDetail->account->account_code ?? $counterDetail->account->account_number ?? '';
                         $accountName = $counterDetail->account->account_name;
                     }
                 } else {
