@@ -55,12 +55,15 @@ class MemberController extends Controller
         ])
         ->when($status, function ($q) use ($status) {
             $q->where('status', $status);
-        })->when($search !== '', function ($query) use ($search) {
+        })->when(strlen($search) >= 2, function ($query) use ($search) {
             $cleanNumber = ltrim($search, '0');
 
             $query->where(function ($q) use ($search, $cleanNumber) {
                 $q->where('name', 'LIKE', "%{$search}%")
-                  ->orWhere('member_number', 'LIKE', "%{$search}%");
+                  ->orWhere('member_number', 'LIKE', "%{$search}%")
+                  ->orWhere('nik', 'LIKE', "%{$search}%")
+                  ->orWhere('buku_putih_no', 'LIKE', "%{$search}%")
+                  ->orWhere('church_sector', 'LIKE', "%{$search}%");
 
                 if ($cleanNumber !== '') {
                     $q->orWhere('member_number', $cleanNumber);
@@ -125,11 +128,14 @@ class MemberController extends Controller
         $search = trim((string) ($request->input('search') ?? $request->input('q') ?? $request->input('query') ?? $request->input('keyword') ?? ''));
 
         $query = Member::whereIn('status', ['active', 'ACTIVE'])
-            ->when($search !== '', function ($query) use ($search) {
+            ->when(strlen($search) >= 2, function ($query) use ($search) {
                 $cleanNumber = ltrim($search, '0');
                 $query->where(function ($q) use ($search, $cleanNumber) {
                     $q->where('name', 'LIKE', "%{$search}%")
-                      ->orWhere('member_number', 'LIKE', "%{$search}%");
+                      ->orWhere('member_number', 'LIKE', "%{$search}%")
+                      ->orWhere('nik', 'LIKE', "%{$search}%")
+                      ->orWhere('buku_putih_no', 'LIKE', "%{$search}%")
+                      ->orWhere('church_sector', 'LIKE', "%{$search}%");
                     if ($cleanNumber !== '') {
                         $q->orWhere('member_number', $cleanNumber);
                     }
@@ -175,12 +181,15 @@ class MemberController extends Controller
 
         $memberQuery = Member::when($statusFilter !== 'all', function ($q) use ($statusFilter) {
             $q->whereIn('status', [$statusFilter, strtoupper($statusFilter)]);
-        })->when($search !== '', function ($q) use ($search) {
+        })->when(strlen($search) >= 2, function ($q) use ($search) {
             $cleanNumber = ltrim($search, '0');
 
             $q->where(function ($sub) use ($search, $cleanNumber) {
                 $sub->where('name', 'LIKE', "%{$search}%")
-                    ->orWhere('member_number', 'LIKE', "%{$search}%");
+                    ->orWhere('member_number', 'LIKE', "%{$search}%")
+                    ->orWhere('nik', 'LIKE', "%{$search}%")
+                    ->orWhere('buku_putih_no', 'LIKE', "%{$search}%")
+                    ->orWhere('church_sector', 'LIKE', "%{$search}%");
 
                 if ($cleanNumber !== '') {
                     $sub->orWhere('member_number', $cleanNumber);
