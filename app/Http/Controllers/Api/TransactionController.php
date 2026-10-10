@@ -970,7 +970,6 @@ class TransactionController extends Controller
                     'transactions.denda',
                     'transactions.book_type',
                     'transactions.created_at',
-                    'transactions.updated_at',
                 ])
                 ->with([
                     'member:id,name,member_number',
@@ -1078,7 +1077,7 @@ class TransactionController extends Controller
                 $accountCode = '2020';
                 $accountName = 'Simpanan Anggota';
 
-                if ($trx->relationLoaded('journalEntry') && $trx->journalEntry && $trx->journalEntry->details && $trx->journalEntry->details->count() > 0) {
+                if ($trx->journalEntry && $trx->journalEntry->details->count() > 0) {
                     $counterDetail = $trx->journalEntry->details->first(function ($det) {
                         $code = $det->account ? ($det->account->account_code ?? $det->account->account_number ?? '') : '';
                         return !empty($code) && !in_array($code, ['1000', '1010']);
@@ -1119,7 +1118,6 @@ class TransactionController extends Controller
                 $trx->items   = [$detailItem];
                 $trx->is_multiple = false;
                 $trx->total_amount = (float) $trx->amount;
-                $trx->unsetRelation('journalEntry');
                 $trx->transaction_code = $trx->formatted_receipt_no;
                 $trx->member_name = $trx->member ? $trx->member->name : 'Anggota Umum';
                 $trx->transaction_date = $effectiveDate;
