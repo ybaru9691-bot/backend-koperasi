@@ -1011,15 +1011,32 @@ class MemberController extends Controller
         ]);
 
         // 2. Mapping Alias Parameter Bahasa Indonesia -> Database Column
-        $birthPlace = $request->input('place_of_birth') ?? $request->input('tempat_lahir') ?? $request->input('birth_place');
-        if ($birthPlace !== null) {
-            $validatedData['place_of_birth'] = $birthPlace;
-        }
+        // 1. Profil
+        $validatedData['place_of_birth'] = $request->input('place_of_birth') ?? $request->input('tempat_lahir') ?? $request->input('birth_place') ?? $member->place_of_birth;
 
         $birthDate = $request->input('date_of_birth') ?? $request->input('tanggal_lahir') ?? $request->input('birth_date');
-        if ($birthDate !== null) {
-            $validatedData['date_of_birth'] = $birthDate;
+        if ($birthDate && !in_array($birthDate, ['-', 'null', ''])) {
+            $validatedData['date_of_birth'] = \Carbon\Carbon::parse($birthDate)->format('Y-m-d');
         }
+
+        $validatedData['gender']        = $request->input('gender') ?? $request->input('jenis_kelamin') ?? $member->gender;
+        $validatedData['occupation']    = $request->input('occupation') ?? $request->input('pekerjaan') ?? $member->occupation;
+        $validatedData['education']     = $request->input('education') ?? $request->input('pendidikan') ?? $member->education;
+        $validatedData['family_status'] = $request->input('family_status') ?? $request->input('status_keluarga') ?? $member->family_status;
+        $validatedData['church_sector'] = $request->input('church_sector') ?? $request->input('sektor_gereja') ?? $member->church_sector;
+        $validatedData['address']       = $request->input('address') ?? $request->input('alamat') ?? $member->address;
+
+        // 2. Ahli Waris
+        $validatedData['heir_name']         = $request->input('heir_name') ?? $request->input('nama_ahli_waris') ?? $member->heir_name;
+        $validatedData['heir_relationship'] = $request->input('heir_relationship') ?? $request->input('hubungan_ahli_waris') ?? $member->heir_relationship;
+        $validatedData['heir_place_of_birth'] = $request->input('heir_place_of_birth') ?? $request->input('tempat_lahir_ahli_waris') ?? $request->input('heir_birth_place') ?? $member->heir_place_of_birth;
+
+        $heirBirthDate = $request->input('heir_date_of_birth') ?? $request->input('tanggal_lahir_ahli_waris') ?? $request->input('heir_birth_date');
+        if ($heirBirthDate && !in_array($heirBirthDate, ['-', 'null', ''])) {
+            $validatedData['heir_date_of_birth'] = \Carbon\Carbon::parse($heirBirthDate)->format('Y-m-d');
+        }
+
+        $validatedData['heir_address'] = $request->input('heir_address') ?? $request->input('alamat_ahli_waris') ?? $member->heir_address;
 
         $nikInput = $request->nik ?? $request->no_ktp ?? $request->ktp;
         if ($nikInput !== null) $validatedData['nik'] = $nikInput;
@@ -1050,21 +1067,6 @@ class MemberController extends Controller
         if ($request->has('is_white_book_active')) $validatedData['is_white_book_active'] = filter_var($request->is_white_book_active, FILTER_VALIDATE_BOOLEAN);
         if ($request->has('white_book_active')) $validatedData['is_white_book_active'] = filter_var($request->white_book_active, FILTER_VALIDATE_BOOLEAN);
         unset($validatedData['white_book_active']);
-
-        if ($request->has('jenis_kelamin')) $validatedData['gender'] = $request->jenis_kelamin;
-        if ($request->has('pekerjaan')) $validatedData['occupation'] = $request->pekerjaan;
-        if ($request->has('pendidikan')) $validatedData['education'] = $request->pendidikan;
-        if ($request->has('status_keluarga')) $validatedData['family_status'] = $request->status_keluarga;
-        if ($request->has('sektor_gereja')) $validatedData['church_sector'] = $request->sektor_gereja;
-        if ($request->has('alamat')) $validatedData['address'] = $request->alamat;
-
-        if ($request->has('nama_ahli_waris')) $validatedData['heir_name'] = $request->nama_ahli_waris;
-        if ($request->has('hubungan_ahli_waris')) $validatedData['heir_relationship'] = $request->hubungan_ahli_waris;
-        if ($request->has('tempat_lahir_ahli_waris')) $validatedData['heir_place_of_birth'] = $request->tempat_lahir_ahli_waris;
-        if ($request->has('heir_birth_place')) $validatedData['heir_place_of_birth'] = $request->heir_birth_place;
-        if ($request->has('tanggal_lahir_ahli_waris')) $validatedData['heir_date_of_birth'] = $request->tanggal_lahir_ahli_waris;
-        if ($request->has('heir_birth_date')) $validatedData['heir_date_of_birth'] = $request->heir_birth_date;
-        if ($request->has('alamat_ahli_waris')) $validatedData['heir_address'] = $request->alamat_ahli_waris;
 
         // 3. Tangani Update PIN jika Admin mengisi form PIN Baru di layar yang sama
         $pinInput = $request->new_pin ?? $request->pin_code ?? $request->pin;
