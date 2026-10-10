@@ -595,23 +595,40 @@ class DashboardController extends Controller
             return 0;
         }
 
-        $totalKM = (float) Transaction::where('status', 'approved')
-            ->where(function($q) {
-                $q->where('type', 'deposit')
-                  ->orWhere('type', 'in')
-                  ->orWhere('type', 'kas_masuk')
-                  ->orWhere('type', 'KM');
-            })
-            ->sum('amount');
+        $cacheKey = 'global_shu_pool_stats_' . date('Y-m');
+        $poolStats = Cache::remember($cacheKey, now()->addMinutes(15), function () {
+            $km = (float) Transaction::where('status', 'approved')
+                ->where(function($q) {
+                    $q->where('type', 'deposit')
+                      ->orWhere('type', 'in')
+                      ->orWhere('type', 'kas_masuk')
+                      ->orWhere('type', 'KM');
+                })
+                ->sum('amount');
 
-        $totalKK = (float) Transaction::where('status', 'approved')
-            ->where(function($q) {
-                $q->where('type', 'withdrawal')
-                  ->orWhere('type', 'out')
-                  ->orWhere('type', 'kas_keluar')
-                  ->orWhere('type', 'KK');
-            })
-            ->sum('amount');
+            $kk = (float) Transaction::where('status', 'approved')
+                ->where(function($q) {
+                    $q->where('type', 'withdrawal')
+                      ->orWhere('type', 'out')
+                      ->orWhere('type', 'kas_keluar')
+                      ->orWhere('type', 'KK');
+                })
+                ->sum('amount');
+
+            $shares = Member::where('status', 'active')
+                ->selectRaw('SUM(principal_savings + mandatory_savings) as total')
+                ->value('total') ?: 1;
+
+            return [
+                'totalKM'        => $km,
+                'totalKK'        => $kk,
+                'totalAllShares' => $shares,
+            ];
+        });
+
+        $totalKM        = (float) ($poolStats['totalKM'] ?? 0.0);
+        $totalKK        = (float) ($poolStats['totalKK'] ?? 0.0);
+        $totalAllShares = (float) ($poolStats['totalAllShares'] ?? 1.0);
 
         $netCashflow = $totalKM - $totalKK;
         if ($netCashflow <= 0) {
@@ -619,10 +636,6 @@ class DashboardController extends Controller
         }
 
         $shuMemberPool = $netCashflow * 0.70;
-
-        $totalAllShares = Member::where('status', 'active')
-            ->selectRaw('SUM(principal_savings + mandatory_savings) as total')
-            ->value('total') ?: 1;
 
         $memberShares = $pokok + $wajib;
 
