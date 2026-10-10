@@ -179,6 +179,26 @@ class MemberDetailsFilteringTest extends TestCase
         $this->assertEquals('Jakarta', $memberFresh->heir_place_of_birth);
         $this->assertEquals('1996-06-16', $memberFresh->heir_date_of_birth->format('Y-m-d'));
         $this->assertEquals('Jl. Ahli Waris No. 10', $memberFresh->heir_address);
+
+        // Update with direct place_of_birth and date_of_birth
+        $resDirect = $this->putJson("/api/members/{$member->id}", [
+            'place_of_birth' => 'Semarang',
+            'date_of_birth'  => '1992-02-20',
+        ]);
+        $resDirect->assertStatus(200);
+        $memberDirect = $member->fresh();
+        $this->assertEquals('Semarang', $memberDirect->place_of_birth);
+        $this->assertEquals('1992-02-20', $memberDirect->date_of_birth->format('Y-m-d'));
+
+        // Update with Indonesian alias tempat_lahir and tanggal_lahir
+        $resAlias = $this->putJson("/api/members/{$member->id}", [
+            'tempat_lahir'  => 'Surabaya',
+            'tanggal_lahir' => '1993-03-25',
+        ]);
+        $resAlias->assertStatus(200);
+        $memberAlias = $member->fresh();
+        $this->assertEquals('Surabaya', $memberAlias->place_of_birth);
+        $this->assertEquals('1993-03-25', $memberAlias->date_of_birth->format('Y-m-d'));
     }
 
     public function test_member_sorting()

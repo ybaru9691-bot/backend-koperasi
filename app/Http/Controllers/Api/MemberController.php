@@ -957,9 +957,9 @@ class MemberController extends Controller
                 \Illuminate\Validation\Rule::unique('members', 'nik')->ignore($member->id),
             ],
             'member_number'       => 'nullable|string|max:30|unique:members,member_number,' . $id,
-            'place_of_birth'      => 'nullable|string|max:255',
-            'tempat_lahir'        => 'nullable|string|max:255',
-            'birth_place'         => 'nullable|string|max:255',
+            'place_of_birth'      => 'nullable|string|max:100',
+            'tempat_lahir'        => 'nullable|string|max:100',
+            'birth_place'         => 'nullable|string|max:100',
             'date_of_birth'       => 'nullable|date',
             'tanggal_lahir'       => 'nullable|date',
             'birth_date'          => 'nullable|date',
@@ -1011,6 +1011,16 @@ class MemberController extends Controller
         ]);
 
         // 2. Mapping Alias Parameter Bahasa Indonesia -> Database Column
+        $birthPlace = $request->input('place_of_birth') ?? $request->input('tempat_lahir') ?? $request->input('birth_place');
+        if ($birthPlace !== null) {
+            $validatedData['place_of_birth'] = $birthPlace;
+        }
+
+        $birthDate = $request->input('date_of_birth') ?? $request->input('tanggal_lahir') ?? $request->input('birth_date');
+        if ($birthDate !== null) {
+            $validatedData['date_of_birth'] = $birthDate;
+        }
+
         $nikInput = $request->nik ?? $request->no_ktp ?? $request->ktp;
         if ($nikInput !== null) $validatedData['nik'] = $nikInput;
 
@@ -1041,10 +1051,6 @@ class MemberController extends Controller
         if ($request->has('white_book_active')) $validatedData['is_white_book_active'] = filter_var($request->white_book_active, FILTER_VALIDATE_BOOLEAN);
         unset($validatedData['white_book_active']);
 
-        if ($request->has('tempat_lahir')) $validatedData['place_of_birth'] = $request->tempat_lahir;
-        if ($request->has('birth_place')) $validatedData['place_of_birth'] = $request->birth_place;
-        if ($request->has('tanggal_lahir')) $validatedData['date_of_birth'] = $request->tanggal_lahir;
-        if ($request->has('birth_date')) $validatedData['date_of_birth'] = $request->birth_date;
         if ($request->has('jenis_kelamin')) $validatedData['gender'] = $request->jenis_kelamin;
         if ($request->has('pekerjaan')) $validatedData['occupation'] = $request->pekerjaan;
         if ($request->has('pendidikan')) $validatedData['education'] = $request->pendidikan;
