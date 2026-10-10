@@ -970,13 +970,12 @@ class TransactionController extends Controller
                     'transactions.denda',
                     'transactions.book_type',
                     'transactions.created_at',
+                    'transactions.updated_at',
                 ])
                 ->with([
                     'member:id,name,member_number',
                     'account:id,account_name,account_number',
                     'operator:id,name',
-                    'journalEntry:id,transaction_id',
-                    'journalEntry.details:id,journal_entry_id,account_id',
                     'journalEntry.details.account:id,account_code,account_name',
                 ]);
 
