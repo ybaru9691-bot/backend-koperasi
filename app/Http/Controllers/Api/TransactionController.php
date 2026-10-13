@@ -973,7 +973,7 @@ class TransactionController extends Controller
                 ])
                 ->with([
                     'member:id,name,member_number',
-                    'account:id,account_name,account_number',
+                    'account:id,account_code,account_name',
                     'operator:id,name',
                     'journalEntry.details.account:id,account_code,account_name',
                 ]);
@@ -1731,7 +1731,7 @@ class TransactionController extends Controller
         if ($member) {
             $columnToUpdate = 'voluntary_savings';
             $descLower = strtolower($transaction->description ?? '');
-            $accCode = $transaction->account ? ($transaction->account->account_number ?? $transaction->account->account_code ?? '') : '';
+            $accCode = $transaction->account ? ($transaction->account->account_code ?? $transaction->account->code ?? $transaction->account->account_number ?? '') : '';
 
             $isOperationalRevenue = in_array($accCode, ['4170', '4181', '4182', '4183', '4184', '4191', '4192', '4193', '4194'])
                 || (str_starts_with($accCode, '4') && $accCode !== '4180')
@@ -1761,7 +1761,7 @@ class TransactionController extends Controller
 
         // 2. Revert status Loan Installment jika transaksi pembayaran cicilan pinjaman
         $descLower = strtolower($transaction->description ?? '');
-        $accCode = $transaction->account ? ($transaction->account->account_number ?? $transaction->account->account_code ?? '') : '';
+        $accCode = $transaction->account ? ($transaction->account->account_code ?? $transaction->account->code ?? $transaction->account->account_number ?? '') : '';
         $isLoanPayment = ($accCode === '1024')
             || str_contains($descLower, 'angsuran')
             || str_contains($descLower, 'cicilan')
