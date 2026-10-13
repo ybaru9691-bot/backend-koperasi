@@ -973,7 +973,7 @@ class TransactionController extends Controller
                 ])
                 ->with([
                     'member:id,name,member_number',
-                    'account:id,account_code,account_name',
+                    'account:id,account_name,account_number',
                     'operator:id,name',
                     'journalEntry.details.account:id,account_code,account_name',
                 ]);
