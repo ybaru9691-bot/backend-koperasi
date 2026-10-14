@@ -142,9 +142,9 @@ class LoanUnderpaidInterestArrearsTest extends TestCase
         $this->assertNotNull($inst2);
         $this->assertEquals('unpaid', $inst2->status);
         $this->assertEquals(500000.00, (float) $inst2->arrears_interest_billed);
-        $this->assertEquals(1000000.00, (float) $inst2->scheduled_interest);
-        $this->assertEquals(1500000.00, (float) $inst2->interest_amount); // 1.000.000 bunga berjalan + 500.000 tunggakan
-        $this->assertEquals(2500000.00, (float) $inst2->total_amount); // 1.000.000 pokok + 1.500.000 bunga
+        $this->assertEquals(800000.00, (float) $inst2->scheduled_interest); // 4.000.000 * 20%
+        $this->assertEquals(1300000.00, (float) $inst2->interest_amount); // 800.000 bunga berjalan + 500.000 tunggakan
+        $this->assertEquals(2300000.00, (float) $inst2->total_amount); // 1.000.000 pokok + 1.300.000 bunga
     }
 
     /**
@@ -166,12 +166,12 @@ class LoanUnderpaidInterestArrearsTest extends TestCase
 
         // Ambil angsuran 2
         $inst2 = LoanInstallment::where('loan_id', $this->loan->id)->where('installment_number', 2)->first();
-        $this->assertEquals(1500000.00, (float) $inst2->interest_amount);
+        $this->assertEquals(1300000.00, (float) $inst2->interest_amount);
 
-        // Bayar angsuran 2 secara penuh (pokok 1.000.000 + bunga 1.500.000 = 2.500.000)
+        // Bayar angsuran 2 secara penuh (pokok 1.000.000 + bunga 1.300.000 = 2.300.000)
         $res2 = $this->postJson("/api/loans/installments/{$inst2->id}/pay", [
             'principal_amount' => 1000000.00,
-            'interest_amount'  => 1500000.00,
+            'interest_amount'  => 1300000.00,
             'receipt_number'   => 'KM-20261015-0002',
         ]);
 
@@ -187,7 +187,7 @@ class LoanUnderpaidInterestArrearsTest extends TestCase
         // Angsuran ke-3 tidak lagi membawa tunggakan
         $inst3 = LoanInstallment::where('loan_id', $this->loan->id)->where('installment_number', 3)->first();
         $this->assertEquals(0.00, (float) $inst3->arrears_interest_billed);
-        $this->assertEquals(1000000.00, (float) $inst3->interest_amount);
+        $this->assertEquals(600000.00, (float) $inst3->interest_amount);
     }
 
     /**
@@ -264,6 +264,6 @@ class LoanUnderpaidInterestArrearsTest extends TestCase
 
         $inst2 = LoanInstallment::where('loan_id', $this->loan->id)->where('installment_number', 2)->first();
         $this->assertEquals(500000.00, (float) $inst2->arrears_interest_billed);
-        $this->assertEquals(1500000.00, (float) $inst2->interest_amount);
+        $this->assertEquals(1300000.00, (float) $inst2->interest_amount);
     }
 }
