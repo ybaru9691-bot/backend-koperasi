@@ -9,10 +9,14 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-   public function up(): void
+  public function up(): void
 {
-    Schema::table('users', function (Blueprint $table) {
-        $table->boolean('is_active')->default(true)->after('role');
+    Schema::table('loans', function (Blueprint $table) {
+        if (!Schema::hasColumn('loans', 'interest_arrears')) {
+            $table->decimal('interest_arrears', 15, 2)->default(0)->after('remaining_amount');
+        }
+        // Jika ada kolom lain yang ditambahkan di migrasi ini, bungkus dengan if yang sama:
+        // if (!Schema::hasColumn('loans', 'nama_kolom_lain')) { ... }
     });
 }
 
