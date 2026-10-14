@@ -266,4 +266,53 @@ class LoanUnderpaidInterestArrearsTest extends TestCase
         $this->assertEquals(500000.00, (float) $inst2->arrears_interest_billed);
         $this->assertEquals(1300000.00, (float) $inst2->interest_amount);
     }
+
+    /**
+     * Uji Kasus 5:
+     * Pastikan pemanggilan Loan::recalculateSchedule():
+     * - Mempertahankan status 'paid' pada angsuran 1 dan tidak pernah mengubahnya menjadi 'partial'/'unpaid'.
+     * - Mempertahankan arrears_interest_billed pada angsuran berikutnya yang belum lunas.
+     * - Menghitung bunga berjalan murni dari sisa pokok berjalan (remaining_principal * monthly_rate).
+     */
+    public function test_recalculate_preserves_paid_status_and_existing_arrears(): void
+    {
+        Sanctum::actingAs($this->admin);
+
+        // Bayar angsuran 1 dengan kekurangan bunga Rp 500.000 via API
+        $inst1 = LoanInstallment::where('loan_id', $this->loan->id)->where('installment_number', 1)->first();
+        $this->postJson("/api/loans/installments/{$inst1->id}/pay", [
+            'principal_amount' => 1000000.00,
+            'interest_amount'  => 500000.00,
+            'penalty_amount'   => 0.00,
+            'receipt_number'   => 'KM-20261015-TEST5',
+        ]);
+
+        $this->loan->refresh();
+        $inst1->refresh();
+        $this->assertEquals('paid', $inst1->status);
+
+        // Panggil recalculateSchedule secara manual
+        $this->loan->recalculateSchedule();
+
+        // 1. Verifikasi angsuran 1 tetap 'paid'
+        $inst1->refresh();
+        $this->assertEquals('paid', $inst1->status);
+        $this->assertNotNull($inst1->paid_at);
+        $this->assertEquals(1000000.00, (float) $inst1->principal_amount);
+
+        // 2. Verifikasi angsuran 2 tetap memiliki tunggakan bunga Rp 500.000
+        $inst2 = LoanInstallment::where('loan_id', $this->loan->id)->where('installment_number', 2)->first();
+        $this->assertEquals('unpaid', $inst2->status);
+        $this->assertEquals(500000.00, (float) $inst2->arrears_interest_billed);
+        $this->assertEquals(800000.00, (float) $inst2->scheduled_interest); // 4jt * 20%
+        $this->assertEquals(1300000.00, (float) $inst2->interest_amount);
+        $this->assertEquals(2300000.00, (float) $inst2->total_amount);
+
+        // 3. Verifikasi angsuran 3 (jadwal selanjutnya) tanpa tunggakan
+        $inst3 = LoanInstallment::where('loan_id', $this->loan->id)->where('installment_number', 3)->first();
+        $this->assertEquals('unpaid', $inst3->status);
+        $this->assertEquals(0.00, (float) $inst3->arrears_interest_billed);
+        $this->assertEquals(600000.00, (float) $inst3->scheduled_interest); // 3jt * 20%
+        $this->assertEquals(600000.00, (float) $inst3->interest_amount);
+    }
 }

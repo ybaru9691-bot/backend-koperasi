@@ -235,9 +235,12 @@ class Loan extends Model
         // Ambil saldo tunggakan bunga pinjaman saat ini
         $arrearsToBill = (float) ($this->interest_arrears ?? 0);
 
-        // 2. Proses berurutan angsuran yang SUDAH LUNAS
+        // 2. Proses berurutan angsuran yang SUDAH LUNAS (pertahankan status paid dan integritas histori)
         foreach ($installments as $inst) {
             if ($isInstPaid($inst)) {
+                if ($inst->status !== 'paid') {
+                    $inst->status = 'paid';
+                }
                 $beginBal = $runningBalance;
                 $actualPrincipal = (float) $inst->principal_amount;
                 $endBal = max(0.0, round($beginBal - $actualPrincipal, 2));
@@ -267,11 +270,15 @@ class Loan extends Model
         // 4. Kalkulasi Jadwal yang Belum Bayar
         for ($idx = 0; $idx < $unpaidCount; $idx++) {
             $inst = $unpaidInstallments[$idx];
+            if ($inst->status === 'paid') {
+                continue; // Strictly NEVER alter a paid installment
+            }
             $remainingMonths = $unpaidCount - $idx;
             $beginBal = $runningBalance;
 
             if ($beginBal <= 0) {
-                $billedArrears = ($idx === 0) ? $arrearsToBill : 0.0;
+                $existingArrears = (float) ($inst->arrears_interest_billed ?? 0);
+                $billedArrears = $existingArrears > 0 ? $existingArrears : (($idx === 0) ? $arrearsToBill : 0.0);
                 $inst->beginning_balance       = 0.0;
                 $inst->principal_amount        = 0.0;
                 $inst->scheduled_interest      = 0.0;
@@ -287,8 +294,10 @@ class Loan extends Model
                 // Bunga dihitung murni dari sisa saldo pokok berjalan periode ini (current_balance * monthlyRate)
                 $scheduledInterest = round($beginBal * $monthlyRate, 2);
 
-                // Bebankan tunggakan bunga periode sebelumnya hanya pada angsuran aktif pertama yang belum dibayar
-                $billedArrears = ($idx === 0) ? $arrearsToBill : 0.0;
+                // Jika baris memiliki arrears_interest_billed > 0, pertahankan.
+                // Jika belum dan merupakan angsuran aktif pertama, gunakan tunggakan bunga pinjaman.
+                $existingArrears = (float) ($inst->arrears_interest_billed ?? 0);
+                $billedArrears = $existingArrears > 0 ? $existingArrears : (($idx === 0) ? $arrearsToBill : 0.0);
                 $totalInterestDue = round($scheduledInterest + $billedArrears, 2);
 
                 // Pokok disesuaikan agar sisa tenor membagi habis sisa pokok sampai lunas (Rp 0 di akhir tenor)

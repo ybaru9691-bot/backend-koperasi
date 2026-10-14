@@ -1461,7 +1461,11 @@ class LoanController extends Controller
                 'status'              => ($newRemainingPrincipal <= 0 && $newLoanInterestArrears <= 0) ? 'completed' : $loan->status,
             ]);
 
-            // 4. Otomatis akumulasikan ke jadwal bulan berikutnya jika ada sisa kekurangan bunga
+            // Panggil recalculateSchedule() TERLEBIH DAHULU agar jadwal berikutnya dikalkulasi ulang berdasarkan sisa pokok terkini
+            $loan->recalculateSchedule();
+            $newRemainingPrincipal = (float) $loan->remaining_principal;
+
+            // 4. SETELAH recalculateSchedule(), jika ada sisa kekurangan bunga, otomatis akumulasikan ke jadwal bulan berikutnya
             if ($unpaidInterest > 0) {
                 $nextInstallment = LoanInstallment::where('loan_id', $loan->id)
                     ->where('installment_number', '>', $installment->installment_number)
@@ -1488,9 +1492,6 @@ class LoanController extends Controller
                     ]);
                 }
             }
-
-            $loan->recalculateSchedule();
-            $newRemainingPrincipal = (float) $loan->remaining_principal;
 
             // 4. Catat Transaksi Kas Masuk (KM approved)
             // Sesuai aturan: Pinjaman BUKAN Buku Saham/Buku Biru, set book_type = null

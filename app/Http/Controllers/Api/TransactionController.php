@@ -675,7 +675,7 @@ class TransactionController extends Controller
                         $unbilledOldArrears = max(0.0, (float) ($activeLoan->interest_arrears ?? 0) - $targetArrearsBilled);
                         $newLoanInterestArrears = max(0.0, round($unbilledOldArrears + $targetUnpaidInterest, 2));
 
-                        // UPDATE record jadwal menjadi 'paid' (LUNAS)
+                        // 1. UPDATE record jadwal selalu menjadi 'paid' (LUNAS untuk periode berjalan)
                         $targetInstallment->update([
                             'status'                  => 'paid',
                             'paid_at'                 => $transactionDate . ' ' . date('H:i:s'),
@@ -693,33 +693,6 @@ class TransactionController extends Controller
                             'paid_by_member_id'       => $member->id,
                             'notes'                   => 'Pembayaran via Kas Masuk (KM)',
                         ]);
-
-                        if ($targetUnpaidInterest > 0) {
-                            $nextInstallment = LoanInstallment::where('loan_id', $activeLoan->id)
-                                ->where('installment_number', '>', $targetInstallment->installment_number)
-                                ->where('status', '!=', 'paid')
-                                ->orderBy('installment_number', 'asc')
-                                ->first();
-
-                            if ($nextInstallment) {
-                                $nextScheduled = (float) (
-                                    ($nextInstallment->scheduled_interest && $nextInstallment->scheduled_interest > 0)
-                                        ? $nextInstallment->scheduled_interest
-                                        : $nextInstallment->interest_amount
-                                );
-                                $nextArrears = $newLoanInterestArrears;
-                                $nextTotalInterest = round($nextScheduled + $nextArrears, 2);
-                                $nextPrincipal = (float) $nextInstallment->principal_amount;
-                                $nextPenalty = (float) ($nextInstallment->penalty_fee ?? $nextInstallment->penalty_amount ?? 0);
-
-                                $nextInstallment->update([
-                                    'scheduled_interest'      => $nextScheduled,
-                                    'arrears_interest_billed' => $nextArrears,
-                                    'interest_amount'         => $nextTotalInterest,
-                                    'total_amount'            => round($nextPrincipal + $nextTotalInterest + $nextPenalty, 2),
-                                ]);
-                            }
-                        }
 
                         $activeLoan->interest_arrears = $newLoanInterestArrears;
                     } else {
@@ -746,6 +719,7 @@ class TransactionController extends Controller
                         ]);
                     }
 
+                    // 2. Update sisa pokok pada pinjaman dan simpan
                     $activeLoan->remaining_principal = $newRemaining;
                     if (Schema::hasColumn('loans', 'remaining_amount')) {
                         $activeLoan->remaining_amount = $newRemaining;
@@ -754,7 +728,39 @@ class TransactionController extends Controller
                         $activeLoan->status = 'PAID_OFF';
                     }
                     $activeLoan->save();
+
+                    // 3. Panggil recalculateSchedule() TERLEBIH DAHULU agar jadwal angsuran berikutnya dikalkulasi ulang berdasarkan sisa pokok terkini
                     $activeLoan->recalculateSchedule();
+
+                    // 4. SETELAH recalculateSchedule() selesai, jika ada sisa bunga ($newLoanInterestArrears > 0),
+                    // cari $nextInstallment (angsuran terdekat berikutnya yang belum lunas) dan update
+                    if ($targetInstallment && ($newLoanInterestArrears ?? 0) > 0) {
+                        $nextInstallment = LoanInstallment::where('loan_id', $activeLoan->id)
+                            ->where('installment_number', '>', $targetInstallment->installment_number)
+                            ->where('status', '!=', 'paid')
+                            ->orderBy('installment_number', 'asc')
+                            ->first();
+
+                        if ($nextInstallment) {
+                            $nextScheduled = (float) (
+                                ($nextInstallment->scheduled_interest && $nextInstallment->scheduled_interest > 0)
+                                    ? $nextInstallment->scheduled_interest
+                                    : $nextInstallment->interest_amount
+                            );
+                            $nextArrears = $newLoanInterestArrears;
+                            $nextTotalInterest = round($nextScheduled + $nextArrears, 2);
+                            $nextPrincipal = (float) $nextInstallment->principal_amount;
+                            $nextPenalty = (float) ($nextInstallment->penalty_fee ?? $nextInstallment->penalty_amount ?? 0);
+
+                            $nextInstallment->update([
+                                'scheduled_interest'      => $nextScheduled,
+                                'arrears_interest_billed' => $nextArrears,
+                                'interest_amount'         => $nextTotalInterest,
+                                'total_amount'            => round($nextPrincipal + $nextTotalInterest + $nextPenalty, 2),
+                            ]);
+                        }
+                    }
+                    // JANGAN panggil recalculateSchedule() lagi setelah update $nextInstallment agar arrears_interest_billed tidak tertimpa!
                 }
             }
 
