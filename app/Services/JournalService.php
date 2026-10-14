@@ -715,7 +715,8 @@ class JournalService
         }
 
         // 11. Angsuran Pinjaman (Pokok) / Pelunasan Piutang → Kredit 1024 (Piutang berkurang)
-        if (str_contains($desc, 'angsuran') || str_contains($desc, 'cicilan')
+        if ($transaction->category === 'angsuran_pinjaman'
+            || str_contains($desc, 'angsuran') || str_contains($desc, 'cicilan')
             || str_contains($desc, 'loan_installment') || str_contains($desc, 'pokok pinjaman')
             || str_contains($desc, 'pelunasan pinjaman') || str_contains($desc, 'bayar pinjaman')
             || str_contains($desc, 'piutang')) {

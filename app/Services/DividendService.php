@@ -261,14 +261,20 @@ class DividendService
             ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
             ->where(function ($q) {
                 $q->whereNull('category')
-                  ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
+                  ->orWhereNotIn('category', [
+                      'bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial',
+                      'angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'
+                  ]);
             })
             ->where(function ($q) {
                 $q->whereNull('description')
                   ->orWhere(function ($sub) {
                       $sub->where('description', 'not like', '%saldo awal%')
                           ->where('description', 'not like', '%deviden%')
-                          ->where('description', 'not like', '%bunga saham%');
+                          ->where('description', 'not like', '%bunga saham%')
+                          ->where('description', 'not like', '%angsuran%')
+                          ->where('description', 'not like', '%cicilan%')
+                          ->where('description', 'not like', '%pinjaman%');
                   });
             })
             ->sum('amount');
@@ -424,14 +430,20 @@ class DividendService
                 ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
                 ->where(function ($q) {
                     $q->whereNull('category')
-                      ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
+                      ->orWhereNotIn('category', [
+                          'bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial',
+                          'angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'
+                      ]);
                 })
                 ->where(function ($q) {
                     $q->whereNull('description')
                       ->orWhere(function ($sub) {
                           $sub->where('description', 'not like', '%saldo awal%')
                               ->where('description', 'not like', '%deviden%')
-                              ->where('description', 'not like', '%bunga saham%');
+                              ->where('description', 'not like', '%bunga saham%')
+                              ->where('description', 'not like', '%angsuran%')
+                              ->where('description', 'not like', '%cicilan%')
+                              ->where('description', 'not like', '%pinjaman%');
                       });
                 })
                 ->selectRaw('member_id, SUM(amount) as total_deposits')
@@ -492,14 +504,20 @@ class DividendService
                 ->whereDate('transaction_date', '<=', $dates['cutoff_date'])
                 ->where(function ($q) {
                     $q->whereNull('category')
-                      ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
+                      ->orWhereNotIn('category', [
+                          'bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial',
+                          'angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'
+                      ]);
                 })
                 ->where(function ($q) {
                     $q->whereNull('description')
                       ->orWhere(function ($sub) {
                           $sub->where('description', 'not like', '%saldo awal%')
                               ->where('description', 'not like', '%deviden%')
-                              ->where('description', 'not like', '%bunga saham%');
+                              ->where('description', 'not like', '%bunga saham%')
+                              ->where('description', 'not like', '%angsuran%')
+                              ->where('description', 'not like', '%cicilan%')
+                              ->where('description', 'not like', '%pinjaman%');
                       });
                 })
                 ->selectRaw('member_id, SUM(amount) as total_deposits')
@@ -1018,7 +1036,10 @@ class DividendService
             ->where('status', 'approved')
             ->where(function ($q) {
                 $q->whereNull('category')
-                  ->orWhereNotIn('category', ['bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial']);
+                  ->orWhereNotIn('category', [
+                      'bunga_saham', 'bunga_simpanan', 'jurnal_penyesuaian', 'memorial',
+                      'angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'
+                  ]);
             })
             ->where(function ($q) {
                 $q->whereNull('payment_method')
@@ -1040,7 +1061,10 @@ class DividendService
                   ->orWhere(function ($sub) {
                       $sub->where('description', 'not like', '%deviden%')
                           ->where('description', 'not like', '%bunga saham%')
-                          ->where('description', 'not like', '%jurnal memorial%');
+                          ->where('description', 'not like', '%jurnal memorial%')
+                          ->where('description', 'not like', '%angsuran%')
+                          ->where('description', 'not like', '%cicilan%')
+                          ->where('description', 'not like', '%pinjaman%');
                   });
             })
             ->select([
@@ -1078,9 +1102,15 @@ class DividendService
             if (str_contains($desc, 'wajib') || $cat === 'simpanan_wajib') {
                 $netSwChange += ($isDep ? $amt : -$amt);
             } elseif (str_contains($desc, 'pokok') || $cat === 'simpanan_pokok') {
-                $netSpChange += ($isDep ? $amt : -$amt);
+                if (!str_contains($desc, 'angsuran') && !str_contains($desc, 'pinjaman') && $cat !== 'angsuran_pinjaman') {
+                    $netSpChange += ($isDep ? $amt : -$amt);
+                }
             } elseif (str_contains($desc, 'saldo awal')) {
                 // Abaikan transaksi saldo awal import agar tidak mengurangi saldo awal berjalan dua kali
+                continue;
+            } elseif ($cat === 'angsuran_pinjaman' || $cat === 'pinjaman' || $cat === 'pencairan_pinjaman'
+                || str_contains($desc, 'angsuran') || str_contains($desc, 'cicilan') || str_contains($desc, 'pinjaman')) {
+                // Pinjaman / Angsuran BUKAN Simpanan Sukarela (SS)!
                 continue;
             } else {
                 $netSsChange += ($isDep ? $amt : -$amt);
@@ -1217,7 +1247,11 @@ class DividendService
 
             $validTrxs = $cycleTrxs->filter(function ($t) {
                 $desc = strtolower($t->description ?? '');
-                return !str_contains($desc, 'saldo awal');
+                $cat  = strtolower($t->category ?? '');
+                if (str_contains($desc, 'saldo awal')) return false;
+                if (in_array($cat, ['angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'])) return false;
+                if (str_contains($desc, 'angsuran') || str_contains($desc, 'cicilan') || str_contains($desc, 'pinjaman')) return false;
+                return true;
             })->values();
 
             if ($validTrxs->isNotEmpty()) {
@@ -1258,8 +1292,14 @@ class DividendService
                         if ($isDep) { $swIn = $amt; $swRunning += $amt; }
                         else        { $swOut = $amt; $swRunning -= $amt; }
                     } elseif (str_contains($desc, 'pokok') || $cat === 'simpanan_pokok') {
-                        if ($isDep) { $spIn = $amt; $spRunning += $amt; }
-                        else        { $spOut = $amt; $spRunning -= $amt; }
+                        if (!str_contains($desc, 'angsuran') && !str_contains($desc, 'pinjaman') && $cat !== 'angsuran_pinjaman') {
+                            if ($isDep) { $spIn = $amt; $spRunning += $amt; }
+                            else        { $spOut = $amt; $spRunning -= $amt; }
+                        }
+                    } elseif (in_array($cat, ['angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'])
+                        || str_contains($desc, 'angsuran') || str_contains($desc, 'cicilan') || str_contains($desc, 'pinjaman')) {
+                        // Jangan pernah memasukkan transaksi pinjaman ke mutasi SS/Saham!
+                        continue;
                     } else {
                         if ($isDep) { $ssIn = $amt; $ssRunning += $amt; }
                         else        { $ssOut = $amt; $ssRunning -= $amt; }

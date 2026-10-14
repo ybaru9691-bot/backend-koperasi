@@ -1334,27 +1334,35 @@ class TabelarisReportService
             if ($isKM) {
                 if ($cat === 'uang_pangkal' || str_contains($desc, 'uang pangkal')) {
                     $summary['uang_pangkal'] += $amt;
+                } elseif ($cat === 'angsuran_pinjaman' || str_contains($desc, 'angsuran') || str_contains($desc, 'cicilan')) {
+                    if (str_contains($desc, 'jasa') || str_contains($desc, 'bunga')) {
+                        $summary['jasa_pinjaman'] += $amt;
+                    } elseif (str_contains($desc, 'denda')) {
+                        $summary['denda_penalti'] += $amt;
+                    } else {
+                        $summary['angsuran_pokok'] += $amt;
+                    }
                 } elseif ($bType === 'buku_putih' || $cat === 'buku_putih' || str_contains($desc, 'buku putih')) {
                     $summary['simpanan_sh'] += $amt;
-                } elseif (str_contains($desc, 'pokok') || $cat === 'simpanan_pokok') {
+                } elseif ((str_contains($desc, 'pokok') && !str_contains($desc, 'pinjaman') && !str_contains($desc, 'angsuran')) || $cat === 'simpanan_pokok') {
                     $summary['simpanan_sp'] += $amt;
                 } elseif (str_contains($desc, 'wajib') || $cat === 'simpanan_wajib') {
                     $summary['simpanan_sw'] += $amt;
-                } elseif ($bType === 'buku_biru' || str_contains($desc, 'sukarela') || $cat === 'simpanan_sukarela') {
+                } elseif (($bType === 'buku_biru' && !str_contains($desc, 'pinjaman') && !str_contains($desc, 'angsuran')) || str_contains($desc, 'sukarela') || $cat === 'simpanan_sukarela') {
                     $summary['simpanan_ss'] += $amt;
                 } else {
                     $summary['lain_lain'] += $amt;
                 }
             } elseif ($isKK) {
-                if ($cat === 'pinjaman' || str_contains($desc, 'pinjaman')) {
+                if ($cat === 'pinjaman' || $cat === 'pencairan_pinjaman' || str_contains($desc, 'pinjaman')) {
                     $summary['piutang'] += $amt;
                 } elseif ($bType === 'buku_putih' || str_contains($desc, 'buku putih')) {
                     $summary['penarikan_sh'] += $amt;
-                } elseif (str_contains($desc, 'pokok')) {
+                } elseif (str_contains($desc, 'pokok') && !str_contains($desc, 'pinjaman')) {
                     $summary['penarikan_sp'] += $amt;
                 } elseif (str_contains($desc, 'wajib')) {
                     $summary['penarikan_sw'] += $amt;
-                } elseif ($bType === 'buku_biru' || str_contains($desc, 'sukarela')) {
+                } elseif (($bType === 'buku_biru' && !str_contains($desc, 'pinjaman')) || str_contains($desc, 'sukarela')) {
                     $summary['penarikan_ss'] += $amt;
                 } else {
                     $summary['biaya'] += $amt;

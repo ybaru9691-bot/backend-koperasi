@@ -553,7 +553,7 @@ class LoanController extends Controller
                 'receipt_number'     => $receiptNo,
                 'member_id'          => $loan->member_id,
                 'account_id'         => $kasAccount->id,
-                'book_type'          => 'BUKU_BIRU',
+                'book_type'          => null,
                 'category'           => 'pencairan_pinjaman',
                 'operator_id'        => $authUser?->id,
                 'approved_by'        => $authUser?->id,
@@ -1395,10 +1395,8 @@ class LoanController extends Controller
         // Hitung sisa bunga yang belum lunas pada angsuran ini
         $unpaidInterest = max(0.0, round($totalInterestObligation - $totalInterestPaid, 2));
 
-        // Tentukan status: 'paid' jika seluruh kewajiban bunga & pokok terpenuhi, 'partial' jika belum penuh
-        $isFullInterest  = ($unpaidInterest <= 0);
-        $isFullPrincipal = ($actualPrincipalPaid >= $scheduledPrincipal);
-        $newStatus       = ($isFullInterest && $isFullPrincipal) ? 'paid' : 'partial';
+        // Tentukan status angsuran menjadi 'paid' (LUNAS)
+        $newStatus = 'paid';
 
         DB::beginTransaction();
         try {
@@ -1447,6 +1445,7 @@ class LoanController extends Controller
             $newRemainingPrincipal = (float) $loan->remaining_principal;
 
             // 4. Catat Transaksi Kas Masuk (KM approved)
+            // Sesuai aturan: Pinjaman BUKAN Buku Saham/Buku Biru, set book_type = null
             $kasAccount = $this->getKasAccount();
             $memberName = $member?->name ?? 'Anggota';
             $trxNumber  = 'KM-' . date('Ymd') . '-' . str_pad((string) mt_rand(1, 9999), 4, '0', STR_PAD_LEFT);
@@ -1456,7 +1455,7 @@ class LoanController extends Controller
                 'receipt_number'     => $receiptNo,
                 'member_id'          => $loan->member_id,
                 'account_id'         => $kasAccount->id,
-                'book_type'          => 'BUKU_BIRU',
+                'book_type'          => null,
                 'category'           => 'angsuran_pinjaman',
                 'operator_id'        => $authUser?->id,
                 'approved_by'        => $authUser?->id,

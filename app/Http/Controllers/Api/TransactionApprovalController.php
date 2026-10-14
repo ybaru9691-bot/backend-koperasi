@@ -125,7 +125,15 @@ class TransactionApprovalController extends Controller
                     $isDeposit    = in_array($type, ['deposit', 'in', 'kas_masuk']);
                     $isWithdrawal = in_array($type, ['withdrawal', 'out', 'kas_keluar']);
 
-                    if ($bookType === 'BUKU_PUTIH') {
+                    $isAngsuranOrLoan = in_array($transaction->category, ['angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'])
+                        || str_contains($desc, 'angsuran')
+                        || str_contains($desc, 'cicilan')
+                        || str_contains($desc, 'pinjaman')
+                        || str_contains($desc, 'piutang');
+
+                    if ($isAngsuranOrLoan) {
+                        $column = null;
+                    } elseif ($bookType === 'BUKU_PUTIH') {
                         $column = 'daily_savings';
                     } else {
                         if (str_contains($desc, 'pokok')) {
@@ -136,9 +144,9 @@ class TransactionApprovalController extends Controller
                             $column = 'voluntary_savings';
                         }
                     }
-                    if ($isDeposit) {
+                    if ($column && $isDeposit) {
                         $member->increment($column, $amount);
-                    } elseif ($isWithdrawal) {
+                    } elseif ($column && $isWithdrawal) {
                         if ($column === 'daily_savings' || $bookType === 'BUKU_PUTIH') {
                             $currentDaily = (float) ($member->daily_savings ?? 0.00);
                             $hasBukuPutih = $member->has_buku_putih || ($currentDaily > 0);
@@ -218,7 +226,8 @@ class TransactionApprovalController extends Controller
                     'receipt_number'     => 'LNC-' . $loan->loan_code,
                     'member_id'          => $loan->member_id,
                     'account_id'         => $accountKas->id,
-                    'book_type'          => 'BUKU_BIRU',
+                    'book_type'          => null,
+                    'category'           => 'pencairan_pinjaman',
                     'operator_id'        => auth()->id(),
                     'approved_by'        => auth()->id(),
                     'type'               => 'withdrawal',

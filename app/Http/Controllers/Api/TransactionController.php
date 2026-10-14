@@ -216,6 +216,7 @@ class TransactionController extends Controller
                     $columnToUpdate = null;
                     $descLower = strtolower($itemDesc);
                     $accCode = trim((string) ($accountCode ?? $coa?->account_code ?? ''));
+                    $category = trim((string) ($item['category'] ?? $request->input('category', '')));
 
                     // Khusus Pos Bank / Bank BRI (Akun 1010) - JANGAN masuk ke 2020
                     $isBankPos = $accCode === '1010' || (str_contains($descLower, 'bank') && !str_contains($descLower, 'jasa bank') && !str_contains($descLower, 'bunga bank'));
@@ -223,16 +224,32 @@ class TransactionController extends Controller
                         $accCode = '1010';
                     }
 
+                    // Cek apakah transaksi merupakan pos angsuran pinjaman / piutang
+                    $isAngsuranOrLoan = ($category === 'angsuran_pinjaman')
+                        || ($category === 'pinjaman')
+                        || ($category === 'pencairan_pinjaman')
+                        || in_array($accCode, ['1024', '4180', '4181', '4182'])
+                        || str_contains($descLower, 'angsuran')
+                        || str_contains($descLower, 'cicilan')
+                        || str_contains($descLower, 'pinjaman')
+                        || str_contains($descLower, 'piutang')
+                        || str_contains($descLower, 'pelunasan pinjaman')
+                        || str_contains($descLower, 'bayar pinjaman');
+
                     // Cek apakah transaksi merupakan pos pendapatan operasional, piutang/pinjaman, atau bank (bukan simpanan)
                     $isOperationalRevenueOrLoan = $isBankPos
-                        || in_array($accCode, ['4170', '4180', '4181', '4182', '4183', '4184', '4191', '4192', '4193', '4194', '1024', '1010'])
+                        || $isAngsuranOrLoan
+                        || in_array($accCode, ['4170', '4183', '4184', '4191', '4192', '4193', '4194', '1010'])
                         || str_starts_with($accCode, '4') || str_starts_with($accCode, '7') || str_starts_with($accCode, '5') || str_starts_with($accCode, '1')
-                        || str_contains($descLower, 'pinjaman') || str_contains($descLower, 'piutang') || str_contains($descLower, 'pencairan')
+                        || str_contains($descLower, 'pencairan')
                         || str_contains($descLower, 'provisi') || str_contains($descLower, 'denda') || str_contains($descLower, 'jasa pinjaman') || str_contains($descLower, 'bunga pinjaman')
                         || str_contains($descLower, 'pendapatan') || str_contains($descLower, 'biaya') || str_contains($descLower, 'beban');
 
                     if ($isOperationalRevenueOrLoan) {
                         $columnToUpdate = null; // Bank, Pendapatan operasional, piutang, & pinjaman TIDAK menambah/mengurangi saldo simpanan anggota
+                        if ($isAngsuranOrLoan) {
+                            $bookType = null; // Pinjaman bukan Buku Saham / Buku Biru
+                        }
                     } elseif ($accCode === '2021' || $bookType === 'BUKU_PUTIH' || str_contains($descLower, 'harian') || str_contains($descLower, 'buku putih') || str_contains($descLower, 'tabungan')) {
                         $columnToUpdate = 'daily_savings';
                         $bookType = 'BUKU_PUTIH';
@@ -332,6 +349,7 @@ class TransactionController extends Controller
                         'member_id'          => $member->id,
                         'account_id'         => $accountKas->id,
                         'book_type'          => $bookType,
+                        'category'           => $category ?: ($isAngsuranOrLoan ? 'angsuran_pinjaman' : null),
                         'operator_id'        => $authUser->id ?? null,
                         'approved_by'        => $authUser->id ?? null,
                         'type'               => $type,
@@ -385,6 +403,7 @@ class TransactionController extends Controller
                 $columnToUpdate = null;
                 $descLower = strtolower($descriptionInput);
                 $accCode = trim((string) ($request->account_code ?? $request->coa_code ?? ''));
+                $category = trim((string) ($request->category ?? $request->input('category', '')));
 
                 // Khusus Pos Bank / Bank BRI (Akun 1010) - JANGAN masuk ke 2020
                 $isBankPos = $accCode === '1010' || (str_contains($descLower, 'bank') && !str_contains($descLower, 'jasa bank') && !str_contains($descLower, 'bunga bank'));
@@ -392,15 +411,31 @@ class TransactionController extends Controller
                     $accCode = '1010';
                 }
 
+                // Cek apakah transaksi merupakan pos angsuran pinjaman / piutang
+                $isAngsuranOrLoan = ($category === 'angsuran_pinjaman')
+                    || ($category === 'pinjaman')
+                    || ($category === 'pencairan_pinjaman')
+                    || in_array($accCode, ['1024', '4180', '4181', '4182'])
+                    || str_contains($descLower, 'angsuran')
+                    || str_contains($descLower, 'cicilan')
+                    || str_contains($descLower, 'pinjaman')
+                    || str_contains($descLower, 'piutang')
+                    || str_contains($descLower, 'pelunasan pinjaman')
+                    || str_contains($descLower, 'bayar pinjaman');
+
                 $isOperationalRevenueOrLoan = $isBankPos
-                    || in_array($accCode, ['4170', '4180', '4181', '4182', '4183', '4184', '4191', '4192', '4193', '4194', '1024', '1010'])
+                    || $isAngsuranOrLoan
+                    || in_array($accCode, ['4170', '4183', '4184', '4191', '4192', '4193', '4194', '1010'])
                     || str_starts_with($accCode, '4') || str_starts_with($accCode, '7') || str_starts_with($accCode, '5') || str_starts_with($accCode, '1')
-                    || str_contains($descLower, 'pinjaman') || str_contains($descLower, 'piutang') || str_contains($descLower, 'pencairan')
+                    || str_contains($descLower, 'pencairan')
                     || str_contains($descLower, 'provisi') || str_contains($descLower, 'denda') || str_contains($descLower, 'jasa pinjaman') || str_contains($descLower, 'bunga pinjaman')
                     || str_contains($descLower, 'pendapatan') || str_contains($descLower, 'biaya') || str_contains($descLower, 'beban');
 
                 if ($isOperationalRevenueOrLoan) {
                     $columnToUpdate = null; // Pendapatan operasional / piutang / pinjaman TIDAK menambah/mengurangi saldo simpanan anggota
+                    if ($isAngsuranOrLoan) {
+                        $bookType = null; // Pinjaman bukan Buku Saham / Buku Biru
+                    }
                 } elseif ($accCode === '2021' || $bookType === 'BUKU_PUTIH' || str_contains($descLower, 'harian') || str_contains($descLower, 'buku putih') || str_contains($descLower, 'tabungan') || $request->has('amount_simpanan_harian') || $request->has('simpanan_harian')) {
                     $columnToUpdate = 'daily_savings';
                     $bookType = 'BUKU_PUTIH';
@@ -502,6 +537,7 @@ class TransactionController extends Controller
                     'member_id'          => $member->id,
                     'account_id'         => $accountKas->id,
                     'book_type'          => $bookType,
+                    'category'           => $category ?: ($isAngsuranOrLoan ? 'angsuran_pinjaman' : null),
                     'operator_id'        => $authUser->id ?? null,
                     'approved_by'        => $authUser->id ?? null,
                     'type'               => $type,
@@ -549,20 +585,25 @@ class TransactionController extends Controller
                 foreach ($request->items as $item) {
                     $accCode = trim((string) ($item['account_code'] ?? ''));
                     $itemAmount = (float) ($item['amount'] ?? 0);
+                    $itemDesc = strtolower(trim((string) ($item['description'] ?? '')));
                     if ($itemAmount <= 0) continue;
 
-                    if ($accCode === '1024') {
+                    if ($accCode === '1024' || str_contains($itemDesc, 'pokok')) {
                         $loanPrincipalAmount += $itemAmount;
-                    } elseif ($accCode === '4180') {
+                    } elseif ($accCode === '4180' || str_contains($itemDesc, 'jasa') || str_contains($itemDesc, 'bunga')) {
                         $loanInterestAmount += $itemAmount;
-                    } elseif ($accCode === '4182') {
+                    } elseif ($accCode === '4182' || str_contains($itemDesc, 'denda')) {
                         $loanPenaltyAmount += $itemAmount;
+                    } elseif (str_contains($itemDesc, 'angsuran') || str_contains($itemDesc, 'cicilan')) {
+                        $loanPrincipalAmount += $itemAmount;
                     }
                 }
             } else {
                 $accCode = trim((string) ($request->input('account_code') ?? $request->input('coa_code') ?? ''));
                 $itemAmount = (float) ($request->input('amount') ?? $request->input('amount_simpanan_harian') ?? 0);
                 $dendaInput = (float) ($request->input('denda', 0));
+                $reqCategory = trim((string) $request->input('category', ''));
+                $reqDesc = strtolower(trim((string) ($request->input('description') ?? '')));
 
                 if ($accCode === '1024') {
                     $loanPrincipalAmount += $itemAmount;
@@ -570,7 +611,11 @@ class TransactionController extends Controller
                     $loanInterestAmount += $itemAmount;
                 } elseif ($accCode === '4182') {
                     $loanPenaltyAmount += $itemAmount;
+                } elseif ($reqCategory === 'angsuran_pinjaman' || str_contains($reqDesc, 'angsuran') || str_contains($reqDesc, 'cicilan') || str_contains($reqDesc, 'bayar pinjaman') || str_contains($reqDesc, 'pelunasan')) {
+                    // Kasir menginput pembayaran angsuran sebagai transaksi tunggal (misal KM-20261014-1001)
+                    $loanPrincipalAmount += $itemAmount;
                 }
+
                 if ($dendaInput > 0) {
                     $loanPenaltyAmount += $dendaInput;
                 }
@@ -595,16 +640,30 @@ class TransactionController extends Controller
                     $voucherNumber = $rawVoucher ?: ($savedTransactions[0]->receipt_number ?? null);
 
                     $currentRemaining = (float) ($activeLoan->remaining_principal ?? $activeLoan->remaining_amount ?? $activeLoan->amount);
-                    $newRemaining = max(0.0, $currentRemaining - $loanPrincipalAmount);
 
-                    // 1. Cari jadwal angsuran terlama yang masih berstatus 'unpaid'
+                    // 1. Cari jadwal angsuran terlama yang masih berstatus belum lunas ('unpaid' atau 'partial')
                     $targetInstallment = LoanInstallment::where('loan_id', $activeLoan->id)
                         ->where('status', '!=', 'paid')
                         ->orderBy('installment_number', 'asc')
                         ->first();
 
+                    if ($targetInstallment && $loanInterestAmount == 0 && $loanPrincipalAmount > 0) {
+                        $targetPrincipal = (float) ($targetInstallment->principal_amount ?? 0);
+                        $targetInterest  = (float) ($targetInstallment->interest_amount ?? $targetInstallment->scheduled_interest ?? 0);
+                        if ($targetPrincipal > 0 && $targetInterest > 0 && $loanPrincipalAmount >= ($targetPrincipal + $targetInterest)) {
+                            $loanPrincipalAmount = $targetPrincipal;
+                            $loanInterestAmount  = $targetInterest;
+                        } elseif ($targetPrincipal > 0 && $targetInterest > 0 && $loanPrincipalAmount >= $targetPrincipal) {
+                            $diff = $loanPrincipalAmount - $targetPrincipal;
+                            $loanPrincipalAmount = $targetPrincipal;
+                            $loanInterestAmount  = $diff;
+                        }
+                    }
+
+                    $newRemaining = max(0.0, $currentRemaining - $loanPrincipalAmount);
+
                     if ($targetInstallment) {
-                        // UPDATE record jadwal yang sudah ada
+                        // UPDATE record jadwal menjadi 'paid' (LUNAS)
                         $targetInstallment->update([
                             'status'           => 'paid',
                             'paid_at'          => $transactionDate . ' ' . date('H:i:s'),

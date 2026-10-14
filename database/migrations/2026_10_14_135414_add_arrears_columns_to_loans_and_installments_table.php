@@ -9,13 +9,21 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('loans', function (Blueprint $table) {
-            $table->decimal('interest_arrears', 15, 2)->default(0)->after('remaining_amount');
+            if (!Schema::hasColumn('loans', 'interest_arrears')) {
+                $table->decimal('interest_arrears', 15, 2)->default(0)->after('remaining_amount');
+            }
         });
 
         Schema::table('loan_installments', function (Blueprint $table) {
-            $table->decimal('scheduled_interest', 15, 2)->nullable()->after('interest_amount');
-            $table->decimal('arrears_interest_billed', 15, 2)->default(0)->after('scheduled_interest');
-            $table->decimal('unpaid_interest', 15, 2)->default(0)->after('arrears_interest_billed');
+            if (!Schema::hasColumn('loan_installments', 'scheduled_interest')) {
+                $table->decimal('scheduled_interest', 15, 2)->nullable()->after('interest_amount');
+            }
+            if (!Schema::hasColumn('loan_installments', 'arrears_interest_billed')) {
+                $table->decimal('arrears_interest_billed', 15, 2)->default(0)->after('scheduled_interest');
+            }
+            if (!Schema::hasColumn('loan_installments', 'unpaid_interest')) {
+                $table->decimal('unpaid_interest', 15, 2)->default(0)->after('arrears_interest_billed');
+            }
         });
     }
 

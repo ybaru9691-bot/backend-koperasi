@@ -454,17 +454,28 @@ class Member extends Authenticatable
             ->whereDate('transaction_date', '>', $date)
             ->where(function ($q) use ($type) {
                 if ($type === 'SP') {
-                    $q->where('category', 'simpanan_pokok')->orWhere('description', 'like', '%pokok%');
+                    $q->where('category', 'simpanan_pokok')
+                      ->orWhere(function ($sub) {
+                          $sub->where('description', 'like', '%pokok%')
+                              ->where('description', 'not like', '%angsuran%')
+                              ->where('description', 'not like', '%pinjaman%');
+                      });
                 } elseif ($type === 'SW') {
                     $q->where('category', 'simpanan_wajib')->orWhere('description', 'like', '%wajib%');
                 } elseif ($type === 'SS') {
-                    $q->where('category', 'simpanan_sukarela')
-                      ->orWhere('category', 'bunga_saham')
-                      ->orWhere(function ($sub) {
-                          $sub->whereNotIn('category', ['simpanan_pokok', 'simpanan_wajib'])
-                              ->where('description', 'not like', '%pokok%')
-                              ->where('description', 'not like', '%wajib%');
-                      });
+                    $q->where(function ($sub) {
+                        $sub->where('category', 'simpanan_sukarela')
+                            ->orWhere('category', 'bunga_saham');
+                    })->orWhere(function ($sub) {
+                        $sub->whereNotIn('category', [
+                            'simpanan_pokok', 'simpanan_wajib', 'angsuran_pinjaman', 'pinjaman', 'pencairan_pinjaman'
+                        ])
+                            ->where('description', 'not like', '%pokok%')
+                            ->where('description', 'not like', '%wajib%')
+                            ->where('description', 'not like', '%angsuran%')
+                            ->where('description', 'not like', '%cicilan%')
+                            ->where('description', 'not like', '%pinjaman%');
+                    });
                 }
             })
             ->selectRaw("
