@@ -628,10 +628,17 @@ class LoanController extends Controller
                 'installment_order'  => (int) $inst->installment_number,
                 'installment_number' => (int) $inst->installment_number,
                 'angsuran_ke'        => (int) $inst->installment_number,
-                'principal_amount'   => (float) $inst->principal_amount,
-                'angsuran_pokok'     => (float) $inst->principal_amount,
-                'interest_amount'    => (float) $inst->interest_amount,
-                'jasa_pinjaman'      => (float) $inst->interest_amount,
+                'principal_amount'         => (float) $inst->principal_amount,
+                'angsuran_pokok'           => (float) $inst->principal_amount,
+                'interest_amount'          => (float) $inst->interest_amount,
+                'jasa_pinjaman'            => (float) $inst->interest_amount,
+                'scheduled_interest'       => (float) ($inst->scheduled_interest ?? $inst->interest_amount ?? 0),
+                'bunga_berjalan'           => (float) ($inst->scheduled_interest ?? $inst->interest_amount ?? 0),
+                'arrears_interest_billed'  => (float) ($inst->arrears_interest_billed ?? 0),
+                'carried_interest_arrears' => (float) ($inst->arrears_interest_billed ?? 0),
+                'tunggakan_bunga'          => (float) ($inst->arrears_interest_billed ?? 0),
+                'unpaid_interest'          => (float) ($inst->unpaid_interest ?? 0),
+                'sisa_bunga'               => (float) ($inst->unpaid_interest ?? 0),
                 'late_fee'           => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
                 'penalty_amount'     => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
                 'denda'              => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
@@ -1350,52 +1357,64 @@ class LoanController extends Controller
         $penaltyFeeInput = (float) ($request->input('penalty_amount') ?? $request->input('penalty_fee', 0.0));
         $totalPenaltyDue = max($penaltyDue, $penaltyFeeInput);
 
-        // 2. Hitung total uang pembayaran yang masuk
-        if ($request->has('total_amount') && (float) $request->input('total_amount') > 0) {
-            $totalMoney = (float) $request->input('total_amount');
-        } elseif ($request->has('amount') && (float) $request->input('amount') > 0) {
-            $totalMoney = (float) $request->input('amount');
+        // 2. Hitung alokasi pembayaran: Pokok, Bunga, dan Denda
+        $hasPrincipalInput = $request->has('principal_amount') && $request->input('principal_amount') !== null && $request->input('principal_amount') !== '';
+        $hasInterestInput  = $request->has('interest_amount') && $request->input('interest_amount') !== null && $request->input('interest_amount') !== '';
+        $hasPenaltyInput   = ($request->has('penalty_amount') && $request->input('penalty_amount') !== null) || ($request->has('penalty_fee') && $request->input('penalty_fee') !== null);
+
+        $penaltyFeeInput = (float) ($request->input('penalty_amount') ?? $request->input('penalty_fee', 0.0));
+        $actualPenaltyPaid = $hasPenaltyInput ? $penaltyFeeInput : $totalPenaltyDue;
+
+        if ($hasInterestInput || $hasPrincipalInput) {
+            // (A) Input eksplisit komponen pokok dan/atau bunga dari formulir/client
+            $actualPrincipalPaid = $hasPrincipalInput
+                ? (float) $request->input('principal_amount')
+                : $scheduledPrincipal;
+
+            $totalInterestPaid = $hasInterestInput
+                ? (float) $request->input('interest_amount')
+                : $totalInterestObligation;
+
+            $totalPaid = round($actualPrincipalPaid + $totalInterestPaid + $actualPenaltyPaid, 2);
+        } elseif ($request->has('total_amount') || $request->has('amount')) {
+            // (B) Input nominal total (lump sum)
+            $totalMoney = (float) ($request->input('total_amount') ?? $request->input('amount'));
+            $remainingMoney = $totalMoney;
+
+            // Prioritas alokasi uang masuk: (1) Denda -> (2) Pokok Pinjaman -> (3) Bunga/Jasa
+            $actualPenaltyPaid = min($remainingMoney, $totalPenaltyDue);
+            $remainingMoney -= $actualPenaltyPaid;
+
+            $actualPrincipalPaid = min($remainingMoney, $scheduledPrincipal);
+            $remainingMoney -= $actualPrincipalPaid;
+
+            $totalInterestPaid = $remainingMoney;
+            $totalPaid = round($actualPrincipalPaid + $totalInterestPaid + $actualPenaltyPaid, 2);
         } else {
-            $pIn = $request->has('principal_amount') ? (float) $request->input('principal_amount') : $scheduledPrincipal;
-            $iIn = $request->has('interest_amount') ? (float) $request->input('interest_amount') : $totalInterestObligation;
-            $totalMoney = round($pIn + $iIn + $penaltyFeeInput, 2);
+            // (C) Default: Bayar penuh tagihan angsuran berjalan
+            $actualPrincipalPaid = $scheduledPrincipal;
+            $totalInterestPaid   = $totalInterestObligation;
+            $actualPenaltyPaid   = $totalPenaltyDue;
+            $totalPaid           = round($actualPrincipalPaid + $totalInterestPaid + $actualPenaltyPaid, 2);
         }
 
         // Validasi total setoran tidak boleh kosong / <= 0
-        if ($totalMoney <= 0) {
+        if ($totalPaid <= 0) {
             return response()->json([
                 'success' => false,
                 'message' => 'Total pembayaran harus lebih besar dari Rp 0.',
             ], 422);
         }
 
-        // 3. WATERFALL PAYMENT ALLOCATION:
-        // Prioritas pemotongan: (1) Denda -> (2) Tunggakan Bunga Lama -> (3) Bunga Berjalan -> (4) Pokok Pinjaman
-        $remainingMoney = $totalMoney;
+        // Pecah alokasi bunga antara tunggakan periode lalu dan bunga periode berjalan
+        $actualArrearsPaid = min($totalInterestPaid, $arrearsBilled);
+        $actualCurrentInterestPaid = round($totalInterestPaid - $actualArrearsPaid, 2);
 
-        // (1) Denda
-        $actualPenaltyPaid = min($remainingMoney, $totalPenaltyDue);
-        $remainingMoney -= $actualPenaltyPaid;
-
-        // (2) Tunggakan Bunga Periode Sebelumnya (arrears_interest_billed)
-        $actualArrearsPaid = min($remainingMoney, $arrearsBilled);
-        $remainingMoney -= $actualArrearsPaid;
-
-        // (3) Bunga Berjalan Periode Ini (scheduled_interest)
-        $actualCurrentInterestPaid = min($remainingMoney, $scheduledInterest);
-        $remainingMoney -= $actualCurrentInterestPaid;
-
-        // (4) Pokok Pinjaman (sisa uang baru memotong Pokok)
-        $actualPrincipalPaid = $remainingMoney;
-        $remainingMoney = 0.0;
-
-        $totalInterestPaid = round($actualArrearsPaid + $actualCurrentInterestPaid, 2);
-        $totalPaid         = round($actualPrincipalPaid + $totalInterestPaid + $actualPenaltyPaid, 2);
-
-        // Hitung sisa bunga yang belum lunas pada angsuran ini
+        // 3. Hitung selisih kekurangan bunga bulan berjalan
+        // Aturan Koperasi: unpaid_interest = max(0, total_kewajiban_bunga - bunga_yang_dibayar)
         $unpaidInterest = max(0.0, round($totalInterestObligation - $totalInterestPaid, 2));
 
-        // Tentukan status angsuran menjadi 'paid' (LUNAS)
+        // 4. Status angsuran menjadi 'paid' (LUNAS untuk periode berjalan)
         $newStatus = 'paid';
 
         DB::beginTransaction();
@@ -1404,12 +1423,13 @@ class LoanController extends Controller
             $receiptNo = $request->input('receipt_number')
                 ?? ('KM-' . date('Ymd') . '-' . str_pad((string) mt_rand(1, 9999), 4, '0', STR_PAD_LEFT));
 
-            // 1. Update installment (tanpa menimpa nilai tagihan kontrak scheduled_interest & interest_amount)
+            // 1. Simpan record angsuran saat ini dengan nominal bunga realisasi yang masuk
             $installment->update([
                 'status'                  => $newStatus,
                 'paid_at'                 => $paymentDate,
                 'receipt_number'          => $receiptNo,
                 'principal_amount'        => $actualPrincipalPaid,
+                'interest_amount'         => $totalInterestPaid,
                 'scheduled_interest'      => $scheduledInterest,
                 'arrears_interest_billed' => $arrearsBilled,
                 'unpaid_interest'         => $unpaidInterest,
@@ -1428,11 +1448,11 @@ class LoanController extends Controller
                     ->update(['status' => 'paid']);
             }
 
-            // 2. Update saldo akumulasi tunggakan bunga pada model Loan
+            // 2. Hitung akumulasi tunggakan bunga pada model Loan
             $unbilledOldArrears = max(0.0, (float) ($loan->interest_arrears ?? 0) - $arrearsBilled);
             $newLoanInterestArrears = max(0.0, round($unbilledOldArrears + $unpaidInterest, 2));
 
-            // 3. HANYA actualPrincipalPaid yang memotong sisa pokok pinjaman
+            // 3. Update sisa pokok pinjaman
             $newRemainingPrincipal = max(0.0, (float) ($loan->remaining_principal ?? $loan->remaining_amount ?? 0) - $actualPrincipalPaid);
             $loan->update([
                 'remaining_principal' => $newRemainingPrincipal,
@@ -1440,6 +1460,34 @@ class LoanController extends Controller
                 'interest_arrears'    => $newLoanInterestArrears,
                 'status'              => ($newRemainingPrincipal <= 0 && $newLoanInterestArrears <= 0) ? 'completed' : $loan->status,
             ]);
+
+            // 4. Otomatis akumulasikan ke jadwal bulan berikutnya jika ada sisa kekurangan bunga
+            if ($unpaidInterest > 0) {
+                $nextInstallment = LoanInstallment::where('loan_id', $loan->id)
+                    ->where('installment_number', '>', $installment->installment_number)
+                    ->where('status', '!=', 'paid')
+                    ->orderBy('installment_number', 'asc')
+                    ->first();
+
+                if ($nextInstallment) {
+                    $nextScheduledInterest = (float) (
+                        ($nextInstallment->scheduled_interest && $nextInstallment->scheduled_interest > 0)
+                            ? $nextInstallment->scheduled_interest
+                            : $nextInstallment->interest_amount
+                    );
+                    $nextArrears = $newLoanInterestArrears;
+                    $nextTotalInterest = round($nextScheduledInterest + $nextArrears, 2);
+                    $nextPrincipal = (float) $nextInstallment->principal_amount;
+                    $nextPenalty = (float) ($nextInstallment->penalty_fee ?? $nextInstallment->penalty_amount ?? 0);
+
+                    $nextInstallment->update([
+                        'scheduled_interest'      => $nextScheduledInterest,
+                        'arrears_interest_billed' => $nextArrears,
+                        'interest_amount'         => $nextTotalInterest,
+                        'total_amount'            => round($nextPrincipal + $nextTotalInterest + $nextPenalty, 2),
+                    ]);
+                }
+            }
 
             $loan->recalculateSchedule();
             $newRemainingPrincipal = (float) $loan->remaining_principal;
@@ -1479,9 +1527,9 @@ class LoanController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => ($newStatus === 'paid')
+                'message' => ($unpaidInterest <= 0)
                     ? "Angsuran ke-{$installment->installment_number} berhasil dibayar penuh (Lunas)."
-                    : "Pembayaran angsuran ke-{$installment->installment_number} berhasil dicatat sebagian (Partial). Sisa bunga Rp " . number_format($unpaidInterest, 0, ',', '.') . " dialihkan ke tagihan periode berikutnya.",
+                    : "Pembayaran angsuran ke-{$installment->installment_number} berhasil dicatat (Lunas). Sisa bunga Rp " . number_format($unpaidInterest, 0, ',', '.') . " dialihkan ke tagihan periode berikutnya.",
                 'data'    => [
                     'installment'              => $installment->fresh(),
                     'installment_order'        => (int) $installment->installment_number,

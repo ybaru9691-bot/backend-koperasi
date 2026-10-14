@@ -663,21 +663,65 @@ class TransactionController extends Controller
                     $newRemaining = max(0.0, $currentRemaining - $loanPrincipalAmount);
 
                     if ($targetInstallment) {
+                        $targetScheduledInterest = (float) (
+                            ($targetInstallment->scheduled_interest && $targetInstallment->scheduled_interest > 0)
+                                ? $targetInstallment->scheduled_interest
+                                : $targetInstallment->interest_amount
+                        );
+                        $targetArrearsBilled = (float) ($targetInstallment->arrears_interest_billed ?? 0);
+                        $targetTotalInterestObligation = round($targetScheduledInterest + $targetArrearsBilled, 2);
+                        $targetUnpaidInterest = max(0.0, round($targetTotalInterestObligation - $loanInterestAmount, 2));
+
+                        $unbilledOldArrears = max(0.0, (float) ($activeLoan->interest_arrears ?? 0) - $targetArrearsBilled);
+                        $newLoanInterestArrears = max(0.0, round($unbilledOldArrears + $targetUnpaidInterest, 2));
+
                         // UPDATE record jadwal menjadi 'paid' (LUNAS)
                         $targetInstallment->update([
-                            'status'           => 'paid',
-                            'paid_at'          => $transactionDate . ' ' . date('H:i:s'),
-                            'receipt_number'   => $voucherNumber,
-                            'principal_amount' => $loanPrincipalAmount,
-                            'interest_amount'  => $loanInterestAmount,
-                            'penalty_fee'      => $loanPenaltyAmount,
-                            'penalty_amount'   => $loanPenaltyAmount,
-                            'total_amount'     => $totalLoanPayment,
-                            'ending_balance'   => $newRemaining,
-                            'paid_by'          => $authUser->id ?? null,
-                            'paid_by_member_id'=> $member->id,
-                            'notes'            => 'Pembayaran via Kas Masuk (KM)',
+                            'status'                  => 'paid',
+                            'paid_at'                 => $transactionDate . ' ' . date('H:i:s'),
+                            'receipt_number'          => $voucherNumber,
+                            'principal_amount'        => $loanPrincipalAmount,
+                            'interest_amount'         => $loanInterestAmount,
+                            'scheduled_interest'      => $targetScheduledInterest,
+                            'arrears_interest_billed' => $targetArrearsBilled,
+                            'unpaid_interest'         => $targetUnpaidInterest,
+                            'penalty_fee'             => $loanPenaltyAmount,
+                            'penalty_amount'          => $loanPenaltyAmount,
+                            'total_amount'            => $totalLoanPayment,
+                            'ending_balance'          => $newRemaining,
+                            'paid_by'                 => $authUser->id ?? null,
+                            'paid_by_member_id'       => $member->id,
+                            'notes'                   => 'Pembayaran via Kas Masuk (KM)',
                         ]);
+
+                        if ($targetUnpaidInterest > 0) {
+                            $nextInstallment = LoanInstallment::where('loan_id', $activeLoan->id)
+                                ->where('installment_number', '>', $targetInstallment->installment_number)
+                                ->where('status', '!=', 'paid')
+                                ->orderBy('installment_number', 'asc')
+                                ->first();
+
+                            if ($nextInstallment) {
+                                $nextScheduled = (float) (
+                                    ($nextInstallment->scheduled_interest && $nextInstallment->scheduled_interest > 0)
+                                        ? $nextInstallment->scheduled_interest
+                                        : $nextInstallment->interest_amount
+                                );
+                                $nextArrears = $newLoanInterestArrears;
+                                $nextTotalInterest = round($nextScheduled + $nextArrears, 2);
+                                $nextPrincipal = (float) $nextInstallment->principal_amount;
+                                $nextPenalty = (float) ($nextInstallment->penalty_fee ?? $nextInstallment->penalty_amount ?? 0);
+
+                                $nextInstallment->update([
+                                    'scheduled_interest'      => $nextScheduled,
+                                    'arrears_interest_billed' => $nextArrears,
+                                    'interest_amount'         => $nextTotalInterest,
+                                    'total_amount'            => round($nextPrincipal + $nextTotalInterest + $nextPenalty, 2),
+                                ]);
+                            }
+                        }
+
+                        $activeLoan->interest_arrears = $newLoanInterestArrears;
                     } else {
                         // Jika jadwal belum ada atau semua sudah paid, buat baris baru
                         $nextInstallmentNumber = ($activeLoan->installments()->max('installment_number') ?? 0) + 1;
@@ -706,7 +750,7 @@ class TransactionController extends Controller
                     if (Schema::hasColumn('loans', 'remaining_amount')) {
                         $activeLoan->remaining_amount = $newRemaining;
                     }
-                    if ($newRemaining == 0) {
+                    if ($newRemaining == 0 && (float) ($activeLoan->interest_arrears ?? 0) <= 0) {
                         $activeLoan->status = 'PAID_OFF';
                     }
                     $activeLoan->save();
