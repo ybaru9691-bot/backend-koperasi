@@ -17,6 +17,9 @@ class LoanInstallment extends Model
         'beginning_balance',
         'principal_amount',
         'interest_amount',
+        'scheduled_interest',
+        'arrears_interest_billed',
+        'unpaid_interest',
         'ending_balance',
         'penalty_fee',
         'penalty_amount',
@@ -32,15 +35,18 @@ class LoanInstallment extends Model
     ];
 
     protected $casts = [
-        'due_date'          => 'date',
-        'paid_at'           => 'datetime',
-        'beginning_balance' => 'float',
-        'principal_amount'  => 'float',
-        'interest_amount'   => 'float',
-        'ending_balance'    => 'float',
-        'penalty_fee'       => 'float',
-        'penalty_amount'    => 'float',
-        'total_amount'      => 'float',
+        'due_date'                => 'date',
+        'paid_at'                 => 'datetime',
+        'beginning_balance'       => 'float',
+        'principal_amount'        => 'float',
+        'interest_amount'         => 'float',
+        'scheduled_interest'      => 'float',
+        'arrears_interest_billed' => 'float',
+        'unpaid_interest'         => 'float',
+        'ending_balance'          => 'float',
+        'penalty_fee'             => 'float',
+        'penalty_amount'          => 'float',
+        'total_amount'            => 'float',
     ];
 
     public function loan(): BelongsTo

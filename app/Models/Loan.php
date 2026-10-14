@@ -22,6 +22,7 @@ class Loan extends Model
         'monthly_installment',
         'remaining_amount',
         'remaining_principal',
+        'interest_arrears',
         'status',
         'approved_by',
         'approved_at',
@@ -49,6 +50,7 @@ class Loan extends Model
         'monthly_installment' => 'float',
         'remaining_amount'    => 'float',
         'remaining_principal' => 'float',
+        'interest_arrears'    => 'float',
     ];
 
     // ── Relasi ────────────────────────────────────────────────
@@ -165,16 +167,19 @@ class Loan extends Model
             $actualPrincipal = $currentBalance - $endingBalance;
 
             $schedule[] = [
-                'installment_number' => $i,
-                'beginning_balance'  => $currentBalance,
-                'principal_amount'   => $actualPrincipal,
-                'interest_amount'    => $jasa,
-                'ending_balance'     => $endingBalance,
-                'penalty_fee'        => 0.0,
-                'penalty_amount'     => 0.0,
-                'total_amount'       => $actualPrincipal + $jasa,
-                'due_date'           => $baseDate->copy()->addMonths($i)->toDateString(),
-                'status'             => 'unpaid',
+                'installment_number'      => $i,
+                'beginning_balance'       => $currentBalance,
+                'principal_amount'        => $actualPrincipal,
+                'scheduled_interest'      => $jasa,
+                'arrears_interest_billed' => 0.0,
+                'unpaid_interest'         => 0.0,
+                'interest_amount'         => $jasa,
+                'ending_balance'          => $endingBalance,
+                'penalty_fee'             => 0.0,
+                'penalty_amount'          => 0.0,
+                'total_amount'            => $actualPrincipal + $jasa,
+                'due_date'                => $baseDate->copy()->addMonths($i)->toDateString(),
+                'status'                  => 'unpaid',
             ];
 
             $currentBalance = $endingBalance;
@@ -185,13 +190,14 @@ class Loan extends Model
 
     /**
      * Rekalkulasi saldo berjalan (running balance) dan jadwal bunga menurun
-     * secara berurutan berdasarkan PEMBAYARAN POKOK AKTUAL.
+     * secara berurutan berdasarkan PEMBAYARAN POKOK AKTUAL dan akumulasi tunggakan bunga.
      *
      * Aturan Finansial:
      * 1. Bunga/jasa periode berjalan dihitung dari sisa pokok sebelum pembayaran.
      * 2. Pengurangan sisa saldo pokok menggunakan POKOK AKTUAL yang dibayar anggota (bukan pokok jadwal).
      * 3. Sisa saldo pokok baru menjadi saldo awal (beginning_balance) untuk periode berikutnya.
      * 4. Bunga periode berikutnya otomatis menurun mengikuti saldo pokok baru (saldo menurun 2,5%).
+     * 5. Sisa bunga yang belum lunas (interest_arrears) ditagihkan pada angsuran aktif berikutnya (arrears_interest_billed).
      *
      * @return array
      */
@@ -218,14 +224,20 @@ class Loan extends Model
         $principalChunk = (float) ceil($initialBalance / max(1, $tenor));
         $lastPaidEndingBalance = null;
 
-        $unpaidInstallments = $installments->where('status', '!=', 'paid')->values();
+        // Ambil saldo tunggakan bunga pinjaman saat ini
+        $arrearsToBill = (float) ($this->interest_arrears ?? 0);
+
+        // Angsuran yang belum diproses pembayaran
+        $unpaidInstallments = $installments->filter(function ($inst) {
+            return $inst->status !== 'paid' && $inst->paid_at === null;
+        })->values();
         $unpaidCount = $unpaidInstallments->count();
         $processedUnpaid = 0;
 
         foreach ($installments as $inst) {
-            $isPaid = $inst->status === 'paid';
+            $isPaidOrProcessed = ($inst->status === 'paid' || $inst->paid_at !== null);
 
-            if ($isPaid) {
+            if ($isPaidOrProcessed) {
                 $beginBal = $runningBalance;
                 $actualPrincipal = (float) $inst->principal_amount;
                 $endBal = max(0.0, round($beginBal - $actualPrincipal, 2));
@@ -241,11 +253,15 @@ class Loan extends Model
                 $beginBal = $runningBalance;
 
                 if ($beginBal <= 0) {
-                    $inst->beginning_balance = 0.0;
-                    $inst->principal_amount  = 0.0;
-                    $inst->interest_amount   = 0.0;
-                    $inst->ending_balance    = 0.0;
-                    $inst->total_amount      = 0.0;
+                    $billedArrears = ($processedUnpaid === 1) ? $arrearsToBill : 0.0;
+                    $inst->beginning_balance       = 0.0;
+                    $inst->principal_amount        = 0.0;
+                    $inst->scheduled_interest      = 0.0;
+                    $inst->arrears_interest_billed = $billedArrears;
+                    $inst->unpaid_interest         = 0.0;
+                    $inst->interest_amount         = $billedArrears;
+                    $inst->ending_balance          = 0.0;
+                    $inst->total_amount            = $billedArrears;
                     $inst->save();
                     $runningBalance = 0.0;
                 } else {
@@ -260,11 +276,17 @@ class Loan extends Model
 
                     $penaltyFee = (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0);
 
-                    $inst->beginning_balance = $beginBal;
-                    $inst->principal_amount  = $actualPrincipal;
-                    $inst->interest_amount   = $jasa;
-                    $inst->ending_balance    = $endBal;
-                    $inst->total_amount      = $actualPrincipal + $jasa + $penaltyFee;
+                    // Bebankan sisa tunggakan bunga ke angsuran aktif pertama yang belum dibayar
+                    $billedArrears = ($processedUnpaid === 1) ? $arrearsToBill : 0.0;
+                    $totalInterestDue = round($jasa + $billedArrears, 2);
+
+                    $inst->beginning_balance       = $beginBal;
+                    $inst->principal_amount        = $actualPrincipal;
+                    $inst->scheduled_interest      = $jasa;
+                    $inst->arrears_interest_billed = $billedArrears;
+                    $inst->interest_amount         = $totalInterestDue;
+                    $inst->ending_balance          = $endBal;
+                    $inst->total_amount            = round($actualPrincipal + $totalInterestDue + $penaltyFee, 2);
                     $inst->save();
 
                     $runningBalance = $endBal;
@@ -278,7 +300,7 @@ class Loan extends Model
         if (\Illuminate\Support\Facades\Schema::hasColumn('loans', 'remaining_amount')) {
             $this->remaining_amount = $currentRemaining;
         }
-        if ($currentRemaining <= 0) {
+        if ($currentRemaining <= 0 && (float) ($this->interest_arrears ?? 0) <= 0) {
             $this->status = 'completed';
         }
         $this->save();

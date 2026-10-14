@@ -127,6 +127,41 @@ class MemberController extends Controller
     {
         $search = trim((string) ($request->input('search') ?? $request->input('q') ?? $request->input('query') ?? $request->input('keyword') ?? ''));
 
+        // Caching 5 menit untuk dropdown default (tanpa search keyword) agar respons instan & hemat memori
+        if ($search === '') {
+            $data = Cache::remember('active_members_dropdown', 300, function () {
+                return Member::whereIn('status', ['active', 'ACTIVE'])
+                    ->orderBy('name', 'asc')
+                    ->get(['id', 'name', 'member_number', 'phone'])
+                    ->map(function ($m) {
+                        return [
+                            'id'                   => $m->id,
+                            'name'                 => $m->name,
+                            'nama'                 => $m->name,
+                            'member_no'            => $m->member_number,
+                            'member_number'        => $m->member_number,
+                            'no_anggota'           => $m->member_number,
+                            'phone'                => $m->phone,
+                            'no_hp'                => $m->phone,
+                            'status'               => 'active',
+                            'has_buku_biru'        => true,
+                            'has_buku_putih'       => true,
+                            'is_white_book_active' => true,
+                            'white_book_active'    => true,
+                        ];
+                    })
+                    ->values()
+                    ->all();
+            });
+
+            return response()->json([
+                'status'  => 'success',
+                'success' => true,
+                'message' => 'Daftar anggota aktif berhasil diambil',
+                'data'    => $data,
+            ], 200);
+        }
+
         $query = Member::whereIn('status', ['active', 'ACTIVE'])
             ->when(strlen($search) >= 2, function ($query) use ($search) {
                 $cleanNumber = ltrim($search, '0');
@@ -483,6 +518,7 @@ class MemberController extends Controller
 
             DB::commit();
 
+            Cache::forget('active_members_dropdown');
             
             $memberFresh = $member->fresh(['transactions']);
             return response()->json([
@@ -1092,6 +1128,7 @@ class MemberController extends Controller
 
         // 4. Update data anggota
         $member->update($validatedData);
+        Cache::forget('active_members_dropdown');
 
         // 5. Pastikan mutasi saldo awal tercatat di tabel transactions jika daily_savings > 0
         if ((float)($member->daily_savings ?? 0) > 0) {

@@ -732,35 +732,52 @@ class LoanController extends Controller
         })->values()->map(function (LoanInstallment $inst) {
             $dateStr = $inst->paid_at?->format('Y-m-d') ?? $inst->due_date?->format('Y-m-d') ?? null;
             $tellerName = $inst->teller?->name ?? $inst->paidByUser?->name ?? 'Kasir';
+
+            $scheduledInt = (float) ($inst->scheduled_interest ?? $inst->interest_amount ?? 0);
+            $arrearsInt   = (float) ($inst->arrears_interest_billed ?? 0);
+            $totalInt     = (float) ($inst->interest_amount ?? ($scheduledInt + $arrearsInt));
+            $unpaidInt    = (float) ($inst->unpaid_interest ?? 0);
+
             return [
-                'id'                 => $inst->id,
-                'loan_id'            => $inst->loan_id,
-                'date'               => $dateStr,
-                'transaction_date'   => $dateStr,
-                'receipt_number'     => $inst->receipt_number ?? '-',
-                'no_bukti'           => $inst->receipt_number ?? '-',
-                'installment_order'  => (int) $inst->installment_number,
-                'installment_number' => (int) $inst->installment_number,
-                'angsuran_ke'        => (int) $inst->installment_number,
-                'principal_amount'   => (float) $inst->principal_amount,
-                'angsuran_pokok'     => (float) $inst->principal_amount,
-                'interest_amount'    => (float) $inst->interest_amount,
-                'jasa_pinjaman'      => (float) $inst->interest_amount,
-                'late_fee'           => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
-                'denda'              => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
-                'penalty_amount'     => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
-                'teller_name'        => $tellerName,
-                'paraf'              => $tellerName,
-                'beginning_balance'  => (float) ($inst->beginning_balance ?? 0),
-                'sisa_pokok_awal'    => (float) ($inst->beginning_balance ?? 0),
-                'ending_balance'     => (float) ($inst->ending_balance ?? 0),
-                'sisa_pokok_akhir'   => (float) ($inst->ending_balance ?? 0),
-                'total_amount'       => (float) $inst->total_amount,
-                'total_bayar'        => (float) $inst->total_amount,
-                'due_date'           => $inst->due_date?->format('Y-m-d'),
-                'paid_at'            => $inst->paid_at?->format('Y-m-d H:i'),
-                'status'             => $inst->status,
-                'notes'              => $inst->notes,
+                'id'                       => $inst->id,
+                'loan_id'                  => $inst->loan_id,
+                'date'                     => $dateStr,
+                'transaction_date'         => $dateStr,
+                'receipt_number'           => $inst->receipt_number ?? '-',
+                'no_bukti'                 => $inst->receipt_number ?? '-',
+                'installment_order'        => (int) $inst->installment_number,
+                'installment_number'       => (int) $inst->installment_number,
+                'angsuran_ke'              => (int) $inst->installment_number,
+                'principal_amount'         => (float) $inst->principal_amount,
+                'angsuran_pokok'           => (float) $inst->principal_amount,
+                'interest_amount'          => $totalInt,
+                'jasa_pinjaman'            => $totalInt,
+                'scheduled_interest'       => $scheduledInt,
+                'current_month_interest'   => $scheduledInt,
+                'bunga_berjalan'           => $scheduledInt,
+                'arrears_interest_billed'  => $arrearsInt,
+                'carried_interest_arrears' => $arrearsInt,
+                'tunggakan_bunga'          => $arrearsInt,
+                'sisa_bunga_kemarin'       => $arrearsInt,
+                'total_interest_due'       => $totalInt,
+                'total_tagihan_bunga'      => $totalInt,
+                'unpaid_interest'          => $unpaidInt,
+                'sisa_bunga'               => $unpaidInt,
+                'late_fee'                 => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
+                'denda'                    => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
+                'penalty_amount'           => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
+                'teller_name'              => $tellerName,
+                'paraf'                    => $tellerName,
+                'beginning_balance'        => (float) ($inst->beginning_balance ?? 0),
+                'sisa_pokok_awal'          => (float) ($inst->beginning_balance ?? 0),
+                'ending_balance'           => (float) ($inst->ending_balance ?? 0),
+                'sisa_pokok_akhir'         => (float) ($inst->ending_balance ?? 0),
+                'total_amount'             => (float) $inst->total_amount,
+                'total_bayar'              => (float) $inst->total_amount,
+                'due_date'                 => $inst->due_date?->format('Y-m-d'),
+                'paid_at'                  => $inst->paid_at?->format('Y-m-d H:i'),
+                'status'                   => $inst->status,
+                'notes'                    => $inst->notes,
             ];
         });
 
@@ -847,6 +864,8 @@ class LoanController extends Controller
             'outstanding_principal'     => $remainingBalance,
             'total_paid_principal'      => $totalPaidPrincipal,
             'total_pokok_terbayar'      => $totalPaidPrincipal,
+            'interest_arrears'          => (float) ($loan->interest_arrears ?? 0),
+            'tunggakan_bunga'           => (float) ($loan->interest_arrears ?? 0),
         ];
 
         // Tabel Angsuran
@@ -855,37 +874,54 @@ class LoanController extends Controller
         })->values()->map(function (LoanInstallment $inst) {
             $dateStr = $inst->paid_at?->format('Y-m-d') ?? $inst->due_date?->format('Y-m-d') ?? null;
             $tellerName = $inst->teller?->name ?? $inst->paidByUser?->name ?? 'Kasir';
+
+            $scheduledInt = (float) ($inst->scheduled_interest ?? $inst->interest_amount ?? 0);
+            $arrearsInt   = (float) ($inst->arrears_interest_billed ?? 0);
+            $totalInt     = (float) ($inst->interest_amount ?? ($scheduledInt + $arrearsInt));
+            $unpaidInt    = (float) ($inst->unpaid_interest ?? 0);
+
             return [
-                'id'                  => $inst->id,
-                'loan_id'             => $inst->loan_id,
-                'date'                => $dateStr,
-                'transaction_date'    => $dateStr,
-                'receipt_number'      => $inst->receipt_number ?? '-',
-                'no_bukti'            => $inst->receipt_number ?? '-',
-                'installment_order'   => (int) $inst->installment_number,
-                'angsuran_ke'         => (int) $inst->installment_number,
-                'installment_number'  => (int) $inst->installment_number,
-                'principal_amount'    => (float) $inst->principal_amount,
-                'angsuran_pokok'      => (float) $inst->principal_amount,
-                'interest_amount'     => (float) $inst->interest_amount,
-                'jasa_pinjaman'       => (float) $inst->interest_amount,
-                'late_fee'            => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
-                'denda'               => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
-                'penalty_amount'      => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
-                'teller_name'         => $tellerName,
-                'paraf'               => $tellerName,
-                'beginning_balance'   => (float) ($inst->beginning_balance ?? 0),
-                'sisa_pokok_awal'     => (float) ($inst->beginning_balance ?? 0),
-                'ending_balance'      => (float) ($inst->ending_balance ?? 0),
-                'sisa_pokok_akhir'    => (float) ($inst->ending_balance ?? 0),
-                'total_amount'        => (float) $inst->total_amount,
-                'total_bayar'         => (float) $inst->total_amount,
-                'due_date'            => $inst->due_date?->format('Y-m-d'),
-                'jatuh_tempo'         => $inst->due_date?->format('Y-m-d'),
-                'tanggal_bayar'       => $inst->paid_at?->format('Y-m-d H:i'),
-                'paid_at'             => $inst->paid_at?->format('Y-m-d H:i'),
-                'status'              => $inst->status,
-                'notes'               => $inst->notes,
+                'id'                       => $inst->id,
+                'loan_id'                  => $inst->loan_id,
+                'date'                     => $dateStr,
+                'transaction_date'         => $dateStr,
+                'receipt_number'           => $inst->receipt_number ?? '-',
+                'no_bukti'                 => $inst->receipt_number ?? '-',
+                'installment_order'        => (int) $inst->installment_number,
+                'angsuran_ke'              => (int) $inst->installment_number,
+                'installment_number'       => (int) $inst->installment_number,
+                'principal_amount'         => (float) $inst->principal_amount,
+                'angsuran_pokok'           => (float) $inst->principal_amount,
+                'interest_amount'          => $totalInt,
+                'jasa_pinjaman'            => $totalInt,
+                'scheduled_interest'       => $scheduledInt,
+                'current_month_interest'   => $scheduledInt,
+                'bunga_berjalan'           => $scheduledInt,
+                'arrears_interest_billed'  => $arrearsInt,
+                'carried_interest_arrears' => $arrearsInt,
+                'tunggakan_bunga'          => $arrearsInt,
+                'sisa_bunga_kemarin'       => $arrearsInt,
+                'total_interest_due'       => $totalInt,
+                'total_tagihan_bunga'      => $totalInt,
+                'unpaid_interest'          => $unpaidInt,
+                'sisa_bunga'               => $unpaidInt,
+                'late_fee'                 => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
+                'denda'                    => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
+                'penalty_amount'           => (float) ($inst->penalty_fee ?? $inst->penalty_amount ?? 0),
+                'teller_name'              => $tellerName,
+                'paraf'                    => $tellerName,
+                'beginning_balance'        => (float) ($inst->beginning_balance ?? 0),
+                'sisa_pokok_awal'          => (float) ($inst->beginning_balance ?? 0),
+                'ending_balance'           => (float) ($inst->ending_balance ?? 0),
+                'sisa_pokok_akhir'         => (float) ($inst->ending_balance ?? 0),
+                'total_amount'             => (float) $inst->total_amount,
+                'total_bayar'              => (float) $inst->total_amount,
+                'due_date'                 => $inst->due_date?->format('Y-m-d'),
+                'jatuh_tempo'              => $inst->due_date?->format('Y-m-d'),
+                'tanggal_bayar'            => $inst->paid_at?->format('Y-m-d H:i'),
+                'paid_at'                  => $inst->paid_at?->format('Y-m-d H:i'),
+                'status'                   => $inst->status,
+                'notes'                    => $inst->notes,
             ];
         })->values()->all();
 
@@ -895,6 +931,8 @@ class LoanController extends Controller
             'total_jasa_keseluruhan' => (float) $loan->installments->sum('interest_amount'),
             'total_pokok_terbayar'   => $totalPaidPrincipal,
             'remaining_balance'      => $remainingBalance,
+            'interest_arrears'       => (float) ($loan->interest_arrears ?? 0),
+            'total_tunggakan_bunga'  => (float) ($loan->interest_arrears ?? 0),
         ];
 
         return [
@@ -938,7 +976,12 @@ class LoanController extends Controller
      */
     public function getLoanDropdownList(Request $request): JsonResponse
     {
-        $loans = Loan::with('member')
+        $loans = Loan::with([
+                'member:id,name,member_number',
+                'installments' => function ($q) {
+                    $q->where('status', 'paid');
+                }
+            ])
             ->whereIn('status', [
                 'active', 'ACTIVE',
                 'approved', 'APPROVED',
@@ -1178,18 +1221,21 @@ class LoanController extends Controller
                 $instDueDate     = $disbDate->copy()->addMonths($i);
 
                 LoanInstallment::create([
-                    'loan_id'            => $loan->id,
-                    'installment_number' => $i,
-                    'beginning_balance'  => $runningBalance,
-                    'principal_amount'   => $actualPrincipal,
-                    'interest_amount'    => $jasa,
-                    'ending_balance'     => $endingBalance,
-                    'penalty_fee'        => 0.0,
-                    'penalty_amount'     => 0.0,
-                    'total_amount'       => $actualPrincipal + $jasa,
-                    'due_date'           => $instDueDate->toDateString(),
-                    'status'             => 'unpaid',
-                    'paid_by_member_id'  => $loan->member_id,
+                    'loan_id'                 => $loan->id,
+                    'installment_number'      => $i,
+                    'beginning_balance'       => $runningBalance,
+                    'principal_amount'        => $actualPrincipal,
+                    'interest_amount'         => $jasa,
+                    'scheduled_interest'      => $jasa,
+                    'arrears_interest_billed' => 0.0,
+                    'unpaid_interest'         => 0.0,
+                    'ending_balance'          => $endingBalance,
+                    'penalty_fee'             => 0.0,
+                    'penalty_amount'          => 0.0,
+                    'total_amount'            => $actualPrincipal + $jasa,
+                    'due_date'                => $instDueDate->toDateString(),
+                    'status'                  => 'unpaid',
+                    'paid_by_member_id'       => $loan->member_id,
                 ]);
 
                 $runningBalance = $endingBalance;
@@ -1245,6 +1291,8 @@ class LoanController extends Controller
             'penalty_amount'   => 'nullable|numeric|min:0',
             'principal_amount' => 'nullable|numeric|min:0',
             'interest_amount'  => 'nullable|numeric|min:0',
+            'total_amount'     => 'nullable|numeric|min:0',
+            'amount'           => 'nullable|numeric|min:0',
             'paid_at'          => 'nullable|date',
             'payment_method'   => 'nullable|string',
             'notes'            => 'nullable|string',
@@ -1271,7 +1319,7 @@ class LoanController extends Controller
                 ->where('installment_number', $installment->installment_number - 1)
                 ->first();
 
-            if ($prevInstallment && $prevInstallment->status !== 'paid') {
+            if ($prevInstallment && !in_array($prevInstallment->status, ['paid', 'partial', 'partially_paid'])) {
                 return response()->json([
                     'success' => false,
                     'message' => "Angsuran sebelumnya (Ke-{$prevInstallment->installment_number}) wajib dilunasi terlebih dahulu.",
@@ -1288,23 +1336,69 @@ class LoanController extends Controller
             return $lockRes;
         }
 
-        // Kalkulasi fleksibel 3 komponen: Pokok, Jasa, Denda
-        $penaltyFee    = (float) ($request->input('penalty_amount') ?? $request->input('penalty_fee', 0.0));
-        $principalPaid = $request->has('principal_amount')
-            ? (float) $request->input('principal_amount')
-            : (float) $installment->principal_amount;
-        $interestPaid  = $request->has('interest_amount')
-            ? (float) $request->input('interest_amount')
-            : (float) $installment->interest_amount;
-        $totalPaid     = $principalPaid + $interestPaid + $penaltyFee;
+        // 1. Tentukan komponen kewajiban tagihan angsuran ini
+        $scheduledInterest = (float) (
+            ($installment->scheduled_interest && $installment->scheduled_interest > 0)
+                ? $installment->scheduled_interest
+                : $installment->interest_amount
+        );
+        $arrearsBilled = (float) ($installment->arrears_interest_billed ?? 0.0);
+        $totalInterestObligation = round($scheduledInterest + $arrearsBilled, 2);
+        $scheduledPrincipal = (float) $installment->principal_amount;
+
+        $penaltyDue = (float) ($installment->penalty_fee ?? $installment->penalty_amount ?? 0.0);
+        $penaltyFeeInput = (float) ($request->input('penalty_amount') ?? $request->input('penalty_fee', 0.0));
+        $totalPenaltyDue = max($penaltyDue, $penaltyFeeInput);
+
+        // 2. Hitung total uang pembayaran yang masuk
+        if ($request->has('total_amount') && (float) $request->input('total_amount') > 0) {
+            $totalMoney = (float) $request->input('total_amount');
+        } elseif ($request->has('amount') && (float) $request->input('amount') > 0) {
+            $totalMoney = (float) $request->input('amount');
+        } else {
+            $pIn = $request->has('principal_amount') ? (float) $request->input('principal_amount') : $scheduledPrincipal;
+            $iIn = $request->has('interest_amount') ? (float) $request->input('interest_amount') : $totalInterestObligation;
+            $totalMoney = round($pIn + $iIn + $penaltyFeeInput, 2);
+        }
 
         // Validasi total setoran tidak boleh kosong / <= 0
-        if ($totalPaid <= 0) {
+        if ($totalMoney <= 0) {
             return response()->json([
                 'success' => false,
                 'message' => 'Total pembayaran harus lebih besar dari Rp 0.',
             ], 422);
         }
+
+        // 3. WATERFALL PAYMENT ALLOCATION:
+        // Prioritas pemotongan: (1) Denda -> (2) Tunggakan Bunga Lama -> (3) Bunga Berjalan -> (4) Pokok Pinjaman
+        $remainingMoney = $totalMoney;
+
+        // (1) Denda
+        $actualPenaltyPaid = min($remainingMoney, $totalPenaltyDue);
+        $remainingMoney -= $actualPenaltyPaid;
+
+        // (2) Tunggakan Bunga Periode Sebelumnya (arrears_interest_billed)
+        $actualArrearsPaid = min($remainingMoney, $arrearsBilled);
+        $remainingMoney -= $actualArrearsPaid;
+
+        // (3) Bunga Berjalan Periode Ini (scheduled_interest)
+        $actualCurrentInterestPaid = min($remainingMoney, $scheduledInterest);
+        $remainingMoney -= $actualCurrentInterestPaid;
+
+        // (4) Pokok Pinjaman (sisa uang baru memotong Pokok)
+        $actualPrincipalPaid = $remainingMoney;
+        $remainingMoney = 0.0;
+
+        $totalInterestPaid = round($actualArrearsPaid + $actualCurrentInterestPaid, 2);
+        $totalPaid         = round($actualPrincipalPaid + $totalInterestPaid + $actualPenaltyPaid, 2);
+
+        // Hitung sisa bunga yang belum lunas pada angsuran ini
+        $unpaidInterest = max(0.0, round($totalInterestObligation - $totalInterestPaid, 2));
+
+        // Tentukan status: 'paid' jika seluruh kewajiban bunga & pokok terpenuhi, 'partial' jika belum penuh
+        $isFullInterest  = ($unpaidInterest <= 0);
+        $isFullPrincipal = ($actualPrincipalPaid >= $scheduledPrincipal);
+        $newStatus       = ($isFullInterest && $isFullPrincipal) ? 'paid' : 'partial';
 
         DB::beginTransaction();
         try {
@@ -1312,32 +1406,47 @@ class LoanController extends Controller
             $receiptNo = $request->input('receipt_number')
                 ?? ('KM-' . date('Ymd') . '-' . str_pad((string) mt_rand(1, 9999), 4, '0', STR_PAD_LEFT));
 
-            // 1. Update installment (tetap 'paid' meski hanya bayar bunga pokok = 0)
+            // 1. Update installment (tanpa menimpa nilai tagihan kontrak scheduled_interest & interest_amount)
             $installment->update([
-                'status'           => 'paid',
-                'paid_at'          => $paymentDate,
-                'receipt_number'   => $receiptNo,
-                'principal_amount' => $principalPaid,
-                'interest_amount'  => $interestPaid,
-                'penalty_fee'      => $penaltyFee,
-                'penalty_amount'   => $penaltyFee,
-                'total_amount'     => $totalPaid,
-                'paid_by'          => $authUser?->id,
-                'notes'            => $request->input('notes'),
+                'status'                  => $newStatus,
+                'paid_at'                 => $paymentDate,
+                'receipt_number'          => $receiptNo,
+                'principal_amount'        => $actualPrincipalPaid,
+                'scheduled_interest'      => $scheduledInterest,
+                'arrears_interest_billed' => $arrearsBilled,
+                'unpaid_interest'         => $unpaidInterest,
+                'penalty_fee'             => $actualPenaltyPaid,
+                'penalty_amount'          => $actualPenaltyPaid,
+                'total_amount'            => $totalPaid,
+                'paid_by'                 => $authUser?->id,
+                'notes'                   => $request->input('notes'),
             ]);
 
-            // 2. HANYA principal_amount yang memotong sisa pokok pinjaman
-            $newRemainingPrincipal = max(0.0, (float) ($loan->remaining_principal ?? $loan->remaining_amount ?? 0) - $principalPaid);
+            // Jika tunggakan bunga periode sebelumnya sudah terbayar pada angsuran ini, tandai angsuran lama menjadi paid
+            if ($arrearsBilled > 0 && $actualArrearsPaid >= $arrearsBilled) {
+                LoanInstallment::where('loan_id', $loan->id)
+                    ->where('status', 'partial')
+                    ->where('installment_number', '<', $installment->installment_number)
+                    ->update(['status' => 'paid']);
+            }
+
+            // 2. Update saldo akumulasi tunggakan bunga pada model Loan
+            $unbilledOldArrears = max(0.0, (float) ($loan->interest_arrears ?? 0) - $arrearsBilled);
+            $newLoanInterestArrears = max(0.0, round($unbilledOldArrears + $unpaidInterest, 2));
+
+            // 3. HANYA actualPrincipalPaid yang memotong sisa pokok pinjaman
+            $newRemainingPrincipal = max(0.0, (float) ($loan->remaining_principal ?? $loan->remaining_amount ?? 0) - $actualPrincipalPaid);
             $loan->update([
                 'remaining_principal' => $newRemainingPrincipal,
                 'remaining_amount'    => $newRemainingPrincipal,
-                'status'              => $newRemainingPrincipal <= 0 ? 'completed' : $loan->status,
+                'interest_arrears'    => $newLoanInterestArrears,
+                'status'              => ($newRemainingPrincipal <= 0 && $newLoanInterestArrears <= 0) ? 'completed' : $loan->status,
             ]);
 
             $loan->recalculateSchedule();
             $newRemainingPrincipal = (float) $loan->remaining_principal;
 
-            // 3. Catat Transaksi Kas Masuk (KM approved)
+            // 4. Catat Transaksi Kas Masuk (KM approved)
             $kasAccount = $this->getKasAccount();
             $memberName = $member?->name ?? 'Anggota';
             $trxNumber  = 'KM-' . date('Ymd') . '-' . str_pad((string) mt_rand(1, 9999), 4, '0', STR_PAD_LEFT);
@@ -1364,26 +1473,34 @@ class LoanController extends Controller
 
             $kasAccount->increment('balance', $totalPaid);
 
-            // 4. Jurnal Split: Kas (1000/1010) | Piutang (1024 jika pokok > 0) | Jasa (4180 jika bunga > 0) | Denda (4182 jika denda > 0)
-            $this->recordInstallmentPaymentJournal($trx, $principalPaid, $interestPaid, $penaltyFee, $authUser?->id, $loan);
+            // 5. Jurnal Split: Kas (1000/1010) | Piutang (1024 jika pokok > 0) | Jasa (4180 jika bunga > 0) | Denda (4182 jika denda > 0)
+            $this->recordInstallmentPaymentJournal($trx, $actualPrincipalPaid, $totalInterestPaid, $actualPenaltyPaid, $authUser?->id, $loan);
 
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => "Angsuran ke-{$installment->installment_number} berhasil dibayar.",
+                'message' => ($newStatus === 'paid')
+                    ? "Angsuran ke-{$installment->installment_number} berhasil dibayar penuh (Lunas)."
+                    : "Pembayaran angsuran ke-{$installment->installment_number} berhasil dicatat sebagian (Partial). Sisa bunga Rp " . number_format($unpaidInterest, 0, ',', '.') . " dialihkan ke tagihan periode berikutnya.",
                 'data'    => [
-                    'installment'       => $installment->fresh(),
-                    'installment_order' => (int) $installment->installment_number,
-                    'angsuran_ke'       => (int) $installment->installment_number,
-                    'loan_sisa_pokok'   => $newRemainingPrincipal,
-                    'remaining_balance' => $newRemainingPrincipal,
-                    'loan_status'       => $loan->fresh()->status,
-                    'total_dibayar'     => $totalPaid,
-                    'principal_paid'    => $principalPaid,
-                    'interest_paid'     => $interestPaid,
-                    'penalty_paid'      => $penaltyFee,
-                    'receipt_number'    => $receiptNo,
+                    'installment'              => $installment->fresh(),
+                    'installment_order'        => (int) $installment->installment_number,
+                    'angsuran_ke'              => (int) $installment->installment_number,
+                    'loan_sisa_pokok'          => $newRemainingPrincipal,
+                    'remaining_balance'        => $newRemainingPrincipal,
+                    'loan_status'              => $loan->fresh()->status,
+                    'status'                   => $newStatus,
+                    'total_dibayar'            => $totalPaid,
+                    'principal_paid'           => $actualPrincipalPaid,
+                    'interest_paid'            => $totalInterestPaid,
+                    'penalty_paid'             => $actualPenaltyPaid,
+                    'current_month_interest'   => $scheduledInterest,
+                    'carried_interest_arrears' => $arrearsBilled,
+                    'total_interest_due'       => $totalInterestObligation,
+                    'unpaid_interest'          => $unpaidInterest,
+                    'loan_interest_arrears'    => (float) $loan->fresh()->interest_arrears,
+                    'receipt_number'           => $receiptNo,
                 ],
             ], 200);
 
