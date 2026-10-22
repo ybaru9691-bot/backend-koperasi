@@ -25,6 +25,44 @@ use Illuminate\Support\Facades\Route;
 // Endpoint Otentikasi Publik (Login NIK / Email)
 Route::post('/login', [AuthController::class, 'login']);
 
+// Endpoint Informasi Versi Aplikasi Publik (In-App Update Check - Bebas Auth)
+Route::get('/app-version', function (Request $request) {
+    $latestVersion = '1.0.1';
+    $minVersion    = '1.0.0';
+    $downloadUrl   = 'https://cumpelitaresortdame.up.railway.app/downloads/koperasi-latest.apk';
+    $releaseNotes  = 'Perbaikan bug sinkronisasi kasir dan peningkatan performa.';
+
+    // Deteksi dinamis jika Flutter mengirimkan query ?current_version=1.0.0
+    $currentVersion = $request->query('current_version', $request->query('version'));
+    $forceUpdate    = false;
+
+    if ($currentVersion) {
+        $forceUpdate = version_compare($currentVersion, $minVersion, '<');
+    }
+
+    // Cek keberadaan file APK di folder public/downloads
+    $apkPath = public_path('downloads/koperasi-latest.apk');
+    $apkExists = file_exists($apkPath);
+    $apkSizeBytes = $apkExists ? filesize($apkPath) : null;
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Informasi versi aplikasi berhasil diambil.',
+        'data'    => [
+            'latest_version' => $latestVersion,
+            'min_version'    => $minVersion,
+            'force_update'   => $forceUpdate,
+            'download_url'   => $downloadUrl,
+            'release_notes'  => $releaseNotes,
+            'file_ready'     => $apkExists,
+            'file_size_mb'   => $apkSizeBytes ? round($apkSizeBytes / (1024 * 1024), 2) : null,
+        ],
+    ], 200)
+    ->header('Access-Control-Allow-Origin', '*')
+    ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+});
+
 // Endpoint Terproteksi (Laravel Sanctum Middleware)
 Route::middleware('auth:sanctum')->group(function () {
 
